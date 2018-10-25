@@ -136,19 +136,6 @@ include("examples.jl")
             @test operator_iter(a)==(4,1)
         end
     end
-
-    @testset "PropagatorDict" begin
-        for n=1:3
-            a=PropagatorDict{Float64,n,Array{Complex{Float64},2}}()
-            b=tuple(rand(n)...)
-            @test add_rf!(a,b) isa PropagatorDict
-            @test haskey(a,b)
-            @test keys(a) isa Base.KeySet
-            for n in fieldnames(typeof(a))
-                @test haskey(getfield(a,n),b)
-            end
-        end
-    end
 end
 
 @testset "hamiltonians" begin

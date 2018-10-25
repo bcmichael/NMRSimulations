@@ -123,14 +123,14 @@ end
 function combine_propagators!(prop_dict, parameters, temp)
     γ_steps = parameters.γ_steps
 
-    for rf in keys(prop_dict.pulse_timings)
+    for rf in values(prop_dict)
         a = Set{Tuple{Int,Int}}()
-        for timing in keys(prop_dict.pulse_timings[rf])
+        for timing in keys(rf.timings)
             push!(a, (mod1(timing[1], γ_steps), mod(timing[2], γ_steps)))
         end
         for combination in a
-            prop_dict.prop_combinations[rf][combination], temp =
-                combine_propagators(prop_dict.steps[rf], combination, parameters, temp)
+            rf.combinations[combination], temp =
+                combine_propagators(rf.step_propagators, combination, parameters, temp)
         end
     end
     return temp
@@ -176,21 +176,21 @@ function combine_propagators(propagators::A, combination, parameters, temp) wher
 end
 
 function build_pulse_props!(prop_dict, parameters, temp)
-    for rf in keys(prop_dict)
-        for timing in keys(prop_dict.pulse_timings[rf])
-            unphased, temp = build_propagator!(similar(temp), prop_dict, rf, timing, parameters, temp)
-            prop_dict.unphased_propagators[rf][timing] = unphased
+    for rf in values(prop_dict)
+        for timing in keys(rf.timings)
+            unphased, temp = build_propagator!(similar(temp), rf, timing, parameters, temp)
+            push!(rf.timings[timing].unphased, unphased)
         end
     end
     generate_phased_propagators!(prop_dict, parameters)
     return temp
 end
 
-function build_propagator!(U,prop_dict, rf, timing, parameters, temp)
+function build_propagator!(U, rf, timing, parameters, temp)
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
 
-    combinations = prop_dict.prop_combinations[rf][(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
+    combinations = rf.combinations[(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
 
     if mod(timing[2], γ_steps) == 0
         start = fld1(timing[1], γ_steps)
@@ -224,20 +224,20 @@ function build_propagator!(U,prop_dict, rf, timing, parameters, temp)
 end
 
 function generate_phased_propagators!(prop_dict, parameters)
-    for rf in keys(prop_dict)
-        for timing in keys(prop_dict.pulse_timings[rf])
-            unphased = prop_dict.unphased_propagators[rf][timing]
-            for phase in prop_dict.pulse_timings[rf][timing]
-                if ! haskey(prop_dict.pulse_props[rf], (timing, phase))
-                    prop_dict.pulse_props[rf][(timing, phase)] = similar(unphased)
+    for rf in values(prop_dict)
+        for timing in values(rf.timings)
+            unphased = timing.unphased[1]
+            for phase in timing.phases
+                if ! haskey(timing.phased, phase)
+                    timing.phased[phase] = similar(unphased)
                 end
 
                 if all(phase .== 0)
-                    copyto!(prop_dict.pulse_props[rf][(timing, phase)], unphased)
+                    copyto!(timing.phased[phase], unphased)
                 else
                     A = typeof(unphased.data)
                     rotator = array_wrapper_type(A)(phase_rotator(phase, parameters.xyz))
-                    rotate!(prop_dict.pulse_props[rf][(timing, phase)], unphased, rotator)
+                    rotate!(timing.phased[phase], unphased, rotator)
                 end
             end
         end
@@ -247,14 +247,15 @@ end
 function γiterate_pulse_propagators!(prop_dict, parameters, γ_iteration, temp)
     γ_steps = parameters.γ_steps
 
-    for rf in keys(prop_dict)
-        for timing in keys(prop_dict.unphased_propagators[rf])
+    for rf in values(prop_dict)
+        for timing_pair in rf.timings
+            timing, timing_collection = timing_pair
             if timing[2] <= 2*γ_steps
                 iterated_timing = tuple(timing[1]+γ_steps*(γ_iteration-1),timing[2])
-                prop_dict.unphased_propagators[rf][timing], temp =
-                    build_propagator!(prop_dict.unphased_propagators[rf][timing], prop_dict, rf, iterated_timing, parameters, temp)
+                timing_collection.unphased[1], temp =
+                    build_propagator!(timing_collection.unphased[1], rf, iterated_timing, parameters, temp)
             else
-                γiterate_propagator!(prop_dict, rf, timing,parameters, γ_iteration,temp)
+                γiterate_propagator!(timing_collection.unphased[1], rf, timing, parameters, γ_iteration, temp)
             end
         end
     end
@@ -262,12 +263,11 @@ function γiterate_pulse_propagators!(prop_dict, parameters, γ_iteration, temp)
     return temp
 end
 
-function γiterate_propagator!(prop_dict, rf, timing,parameters, γ_iteration, temp)
+function γiterate_propagator!(U, rf, timing, parameters, γ_iteration, temp)
     γ_steps = parameters.γ_steps
     nγ = parameters.nγ
 
-    combinations = prop_dict.prop_combinations[rf][(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
-    U = prop_dict.unphased_propagators[rf][timing]
+    combinations = rf.combinations[(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
 
     if mod(timing[2], γ_steps) == 0
         start = fld1(timing[1], γ_steps)+γ_iteration-2
@@ -286,35 +286,36 @@ function γiterate_propagator!(prop_dict, rf, timing,parameters, γ_iteration, t
     end
 end
 
-function build_step_propagators!(prop_dict::PropagatorDict{T,N}, Hinternal::SphericalTensor{A}, parameters) where {T,N,A}
+function build_step_propagators!(prop_dict, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
     period_steps = parameters.period_steps
     angles = parameters.angles
 
-    Hrotated = Vector{A}()
+    Hrotated = Vector{Hamiltonian{T,A}}()
     for n = 1:period_steps
         angles2 = EulerAngles{T}(angles.α+360/period_steps*(n-1), angles.β, angles.γ)
         H = Hamiltonian(rotate_component2(Hinternal, 0, angles2).data.+Hinternal.s00.data)
         push!(Hrotated, H)
     end
     temps = [Hamiltonian(similar(Hrotated[1].data, T)) for j = 1:2]
-    for rf in keys(prop_dict)
-        prop_dict.steps[rf] = step_propagators(rf, Hrotated, parameters, temps)
+    for rf_pair in prop_dict
+        step_propagators!(rf_pair, Hrotated, parameters, temps)
     end
 end
 
-function step_propagators(rf, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
+function step_propagators!(rf_pair, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyz = parameters.xyz
+    rf = rf_pair[1]
+    propagators = rf_pair[2].step_propagators
 
-    new_propagators = Vector{Propagator{T,A}}()
     Hrf = array_wrapper_type(A)(pulse_H(rf,xyz))
     for n = 1:period_steps
         H = real_add(Hrotated[n], Hrf)
         U = expm_cheby(H, step_size/10^6, temps)
-        push!(new_propagators, U)
+        push!(propagators, U)
     end
-    return new_propagators
+    return propagators
 end
 
 function detect!(spec, Uloop, ρ0::SparseMatrixCSC, detector::SparseMatrixCSC, unique_cols, j, temp)
@@ -389,7 +390,7 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
 
     temp = similar(Hinternal.s00, Propagator)
 
-    prop_dict = PropagatorDict{T,N,A}()
+    prop_dict = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
     find_pulses!(prop_dict, sequence, 1, parameters)
     build_step_propagators!(prop_dict, Hinternal, parameters)
     temp = combine_propagators!(prop_dict, parameters, temp)

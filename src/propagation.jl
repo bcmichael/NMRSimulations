@@ -11,7 +11,7 @@ function propagate(pulse::Pulse, start, prop_dict, parameters, temp)
 
     steps = Int(pulse.t/step_size)
     timing = (mod1(start, period_steps), steps)
-    propagator = prop_dict.pulse_props[pulse.γB1][(timing, pulse.phase)]
+    propagator = prop_dict[pulse.γB1].timings[timing].phased[pulse.phase]
     return propagator, steps, temp
 end
 
@@ -244,7 +244,7 @@ function next!(A::PropagationChunk{NonLooped}, state, temp)
 end
 
 
-function find_pulses!(prop_dict, pulse::Pulse, start, parameters)
+function find_pulses!(prop_dict, pulse::Pulse, start, parameters) where {T,N}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
@@ -255,11 +255,11 @@ function find_pulses!(prop_dict, pulse::Pulse, start, parameters)
     end
 
     timing = (mod1(start, period_steps), steps)
-    if ! haskey(prop_dict.pulse_timings[rf], timing)
-        add_timing!(prop_dict, rf, timing)
+    if ! haskey(prop_dict[rf].timings, timing)
+        add_timing!(prop_dict[rf], timing)
     end
 
-    push!(prop_dict.pulse_timings[rf][timing], pulse.phase)
+    push!(prop_dict[rf].timings[timing].phases, pulse.phase)
     return steps
 end
 
