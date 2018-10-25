@@ -111,3 +111,43 @@ end
 axpy!(a::Number, X::HilbertOperator, Y::HilbertOperator) = axpy!(a, X.data, Y.data)
 
 array_wrapper_type(::Type{A}) where {A} = A.name.wrapper
+
+"""
+    pow!(out, X, p, temp)
+
+Raise 'X' to the power of positive integer 'p' and store the result in 'out'.
+'out', 'X', and 'temp' should all be the same type of 'HilbertOperator'. This is
+essentially a copy of Base.power_by_squaring that avoids making so many
+intermediate allocations. Note that the contents of both 'X' and 'temp' will
+also change.
+"""
+function pow!(out::H, x::H, p::Integer, temp::H) where H<:HilbertOperator
+    if p == 1
+        copyto!(out, x)
+    elseif p == 0
+        fill_diag!(out, 1)
+    elseif p == 2
+        mul!(out, x, x)
+    elseif p < 0
+        throw(DomainError)
+    else
+        t = Base.trailing_zeros(p) + 1
+        p >>= t
+        while (t -= 1) > 0
+            mul!(temp, x, x)
+            x, temp = temp, x
+        end
+        copyto!(out, x)
+        while p > 0
+            t = trailing_zeros(p) + 1
+            p >>= t
+            while (t -= 1) >= 0
+                mul!(temp, x, x)
+                x, temp = temp, x
+            end
+            mul!(temp, out, x)
+            put, temp = temp, out
+        end
+    end
+    return out, temp
+end

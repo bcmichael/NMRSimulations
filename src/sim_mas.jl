@@ -196,29 +196,31 @@ function build_propagator!(U, rf, timing, parameters, temp)
         start = fld1(timing[1], γ_steps)
         steps = div(timing[2], γ_steps)
 
-        cycles,remain = divrem(steps, nγ)
+        cycles, remain = divrem(steps, nγ)
         cycle_size = nγ
     else
         start = fld1(timing[1], γ_steps)*2-1
         steps = div(timing[2], γ_steps)*2+1
 
-        cycles,remain = divrem(steps, 2*nγ)
+        cycles, remain = divrem(steps, 2*nγ)
         cycle_size = 2*nγ
     end
 
-    copyto!(U,combinations[mod1(start, cycle_size)])
+    copyto!(U, combinations[mod1(start, cycle_size)])
     for n = start+1:start+remain-1
-        mul!(temp,combinations[mod1(n, cycle_size)],U)
+        mul!(temp, combinations[mod1(n, cycle_size)], U)
         U, temp = temp, U
     end
 
     if cycles>0
         remainder = copy(U)
         for n = start+remain:start+cycle_size-1
-            mul!(temp,combinations[mod1(n, cycle_size)], U)
+            mul!(temp, combinations[mod1(n, cycle_size)], U)
             U,temp = temp, U
         end
-        U = remainder*U^cycles
+        U, temp = pow!(similar(U), U, cycles, temp)
+        mul!(temp, remainder, U)
+        U, temp = temp, U
     end
     return U, temp
 end

@@ -120,7 +120,10 @@ include("examples.jl")
             @test a.data[:,:,1]*b.data[:,:,1]'==c.data[:,:,1]
             mul!(c,a,b,2,0)
             @test 2*a.data[:,:,1]*b.data[:,:,1]==c.data[:,:,1]
-            c=a.data.*b.data
+
+            d = dropdims(b.data, dims=3)^(4)
+            pow!(a, b, 4, c)
+            @test all(a.data .== d)
         end
 
         @testset "Convenience functions" begin
@@ -365,6 +368,7 @@ end
     @test rfdr()[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
     @test sidebands()[1:5]≈[0.5+0.0im, 0.321036-0.02204im, 0.0383774-0.094324im, -0.0511445-0.100016im, -0.0164907-0.0230406im] atol=1E-5
     @test redor()[1:5]≈[0.938156+0.0587413im, 0.774492+0.0491454im, 0.547457+0.0340485im, 0.311615+0.0198252im, 0.115145+0.0072829im] atol=1E-5
+    @test rfdr_long()[1:5]≈[0.0+0.0im, -0.0025425-0.00121519im, 0.000584148-0.00208851im, 0.00160857-0.00116693im, 0.000206966-0.000882959im] atol=1E-5
 end
 
 @testset "cuda_examples" begin

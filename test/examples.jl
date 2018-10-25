@@ -102,3 +102,31 @@ function ubi(a,T::Type = Float64)
     spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
     return spec
 end
+
+# not really a meaningful example but tests a pulse longer than a cycle
+function rfdr_long(M=CPUSingleMode)
+    spins = [Spin(1, 0, 0, 0, 0, 0, 0), Spin(1, 1000, 0, 0, 0, 0, 0)]
+    cs = initial_cs(spins)
+    dip = dipole_coupling(spins,1,2,1000)
+    H = cs+dip
+
+    rfdr = Block([Pulse(48,0,0),
+        Pulse(504,125,0),
+        Pulse(48,0,0)])
+
+    sequence = Sequence([rfdr], 500, [1])
+
+    parameters = SimulationParameters{M}(100, 1, 10, spins)
+
+    x = X(Array{Complex{Float64}})
+    y = Y(Array{Complex{Float64}})
+    z = Z(Array{Complex{Float64}})
+    p = sparse(kron_up(x, 1, 2))
+    detect = sparse(kron_up(x+im*y, 2, 2))
+
+    crystallites, weights = get_crystallites("test/rep100.cry")
+    spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
+
+    GC.gc()
+    return spec
+end
