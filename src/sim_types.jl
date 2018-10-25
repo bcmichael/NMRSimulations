@@ -234,6 +234,6 @@ function add_timing!(collection::PropagatorCollectionRF{T,N,A}, timing::NTuple{2
     collection.timings[timing] = PropagatorCollectionTiming{T,N,A}()
 end
 
-function add_rf!(prop_dict::Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}, rf) where {T,N,A}
-    prop_dict[rf] = PropagatorCollectionRF{T,N,A}()
+function add_rf!(pulse_cache::Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}, rf) where {T,N,A}
+    pulse_cache[rf] = PropagatorCollectionRF{T,N,A}()
 end

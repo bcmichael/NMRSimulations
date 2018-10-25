@@ -68,26 +68,26 @@ function eig_max_bound(A)
 end
 
 """
-    build_generator(sequence, prop_dict, parameters, temp)
+    build_generator(sequence, pulse_cache, parameters, temp)
 
 Build a generator which can subsequently be used to generate the propagators for
 each step of the detection loop of 'sequence'.
 """
-function build_generator(sequence::Sequence, prop_dict, parameters, temp::A) where {A}
+function build_generator(sequence::Sequence, pulse_cache, parameters, temp::A) where {A}
     detection_loop = sequence.detection_loop
     issorted(detection_loop) || error("detection loop must be sorted")
 
-    first_prop, loop_steps, nonloop_steps, temp = build_first_looped(sequence, prop_dict, parameters, temp)
+    first_prop, loop_steps, nonloop_steps, temp = build_first_looped(sequence, pulse_cache, parameters, temp)
     loop_props = Vector{PropagationChunk{Looped,A}}()
     for n = 2:length(detection_loop)
         prop, loop_steps, nonloop_steps, temp =
-            build_looped(sequence, n, loop_steps, nonloop_steps, prop_dict, parameters, temp)
+            build_looped(sequence, n, loop_steps, nonloop_steps, pulse_cache, parameters, temp)
         push!(loop_props, prop)
     end
 
     if detection_loop[end]<length(sequence.pulses)
         last_prop, loop_steps, nonloop_steps, temp =
-            build_nonlooped(sequence, n, loop_steps, nonloop_steps, prop_dict, parameters, temp)
+            build_nonlooped(sequence, n, loop_steps, nonloop_steps, pulse_cache, parameters, temp)
     else
         last_prop = PropagationChunk{NonLooped}(Vector{A}(), Vector{Vector{A}}())
     end
@@ -120,10 +120,10 @@ function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     return occupied
 end
 
-function combine_propagators!(prop_dict, parameters, temp)
+function combine_propagators!(pulse_cache, parameters, temp)
     γ_steps = parameters.γ_steps
 
-    for rf in values(prop_dict)
+    for rf in values(pulse_cache)
         a = Set{Tuple{Int,Int}}()
         for timing in keys(rf.timings)
             push!(a, (mod1(timing[1], γ_steps), mod(timing[2], γ_steps)))
@@ -175,14 +175,14 @@ function combine_propagators(propagators::A, combination, parameters, temp) wher
     return combinations, temp
 end
 
-function build_pulse_props!(prop_dict, parameters, temp)
-    for rf in values(prop_dict)
+function build_pulse_props!(pulse_cache, parameters, temp)
+    for rf in values(pulse_cache)
         for timing in keys(rf.timings)
             unphased, temp = build_propagator!(similar(temp), rf, timing, parameters, temp)
             push!(rf.timings[timing].unphased, unphased)
         end
     end
-    generate_phased_propagators!(prop_dict, parameters)
+    generate_phased_propagators!(pulse_cache, parameters)
     return temp
 end
 
@@ -225,8 +225,8 @@ function build_propagator!(U, rf, timing, parameters, temp)
     return U, temp
 end
 
-function generate_phased_propagators!(prop_dict, parameters)
-    for rf in values(prop_dict)
+function generate_phased_propagators!(pulse_cache, parameters)
+    for rf in values(pulse_cache)
         for timing in values(rf.timings)
             unphased = timing.unphased[1]
             for phase in timing.phases
@@ -246,10 +246,10 @@ function generate_phased_propagators!(prop_dict, parameters)
     end
 end
 
-function γiterate_pulse_propagators!(prop_dict, parameters, γ_iteration, temp)
+function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration, temp)
     γ_steps = parameters.γ_steps
 
-    for rf in values(prop_dict)
+    for rf in values(pulse_cache)
         for timing_pair in rf.timings
             timing, timing_collection = timing_pair
             if timing[2] <= 2*γ_steps
@@ -261,7 +261,7 @@ function γiterate_pulse_propagators!(prop_dict, parameters, γ_iteration, temp)
             end
         end
     end
-    generate_phased_propagators!(prop_dict, parameters)
+    generate_phased_propagators!(pulse_cache, parameters)
     return temp
 end
 
@@ -288,7 +288,7 @@ function γiterate_propagator!(U, rf, timing, parameters, γ_iteration, temp)
     end
 end
 
-function build_step_propagators!(prop_dict, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
+function build_step_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
     period_steps = parameters.period_steps
     angles = parameters.angles
 
@@ -299,7 +299,7 @@ function build_step_propagators!(prop_dict, Hinternal::SphericalTensor{Hamiltoni
         push!(Hrotated, H)
     end
     temps = [Hamiltonian(similar(Hrotated[1].data, T)) for j = 1:2]
-    for rf_pair in prop_dict
+    for rf_pair in pulse_cache
         step_propagators!(rf_pair, Hrotated, parameters, temps)
     end
 end
@@ -392,11 +392,11 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
 
     temp = similar(Hinternal.s00, Propagator)
 
-    prop_dict = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
-    find_pulses!(prop_dict, sequence, 1, parameters)
-    build_step_propagators!(prop_dict, Hinternal, parameters)
-    temp = combine_propagators!(prop_dict, parameters, temp)
-    temp = build_pulse_props!(prop_dict, parameters, temp)
+    pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
+    find_pulses!(pulse_cache, sequence, 1, parameters)
+    build_step_propagators!(pulse_cache, Hinternal, parameters)
+    temp = combine_propagators!(pulse_cache, parameters, temp)
+    temp = build_pulse_props!(pulse_cache, parameters, temp)
 
     if M <: GPUBatchedMode
         GC.gc()
@@ -405,10 +405,10 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     Uloop = similar(temp)
     for n = 1:nγ
         if n != 1
-            temp = γiterate_pulse_propagators!(prop_dict, parameters, n, temp)
+            temp = γiterate_pulse_propagators!(pulse_cache, parameters, n, temp)
         end
 
-        prop_generator, temp = build_generator(sequence, prop_dict, parameters, temp)
+        prop_generator, temp = build_generator(sequence, pulse_cache, parameters, temp)
         spec, Uloop, temp = propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
     end
     return spec
