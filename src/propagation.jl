@@ -1,35 +1,56 @@
 """
-    propagate(pulse, start, pulse_cache, parameters, temp)
+    fetch_propagator(pulse, start, prop_cache, parameters, temp)
 
-Fetch the propagator corrseponding to a given 'pulse' and 'start' step from
-'pulse_cache'. Return the propagator and the number of steps used.
+Fetch the propagator corresponding to a given 'pulse' and 'start' step from
+'prop_cache'. Return the propagator and the number of steps used.
 """
-function propagate(pulse::Pulse, start, pulse_cache, parameters, temp)
+function fetch_propagator(pulse::Pulse, start, prop_cache, parameters, temp)
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyzs = parameters.xyz
 
     steps = Int(pulse.t/step_size)
     timing = (mod1(start, period_steps), steps)
-    propagator = pulse_cache[pulse.γB1].timings[timing].phased[pulse.phase]
+    propagator = prop_cache.pulses[pulse.γB1].timings[timing].phased[pulse.phase]
     return propagator, steps, temp
 end
 
 """
-    propagate(block, start, pulse_cache, parameters, temp)
+    fetch_propagator(block, start, prop_cache, parameters, temp)
+
+Fetch the propagator corresponding to a given 'block' and 'start' step from
+'prop_cache'. If the propagator is not in 'prop_cache', generate it and add it
+to the cache. Return the propagator and the number of steps used.
+"""
+function fetch_propagator(block::Block, start, prop_cache, parameters, temp)
+    period_steps = parameters.period_steps
+
+    start_period = mod1(start, period_steps)
+    if !((block, start_period) in keys(prop_cache.blocks))
+        U, steps, temp = build_block_propagator(block, start_period, prop_cache, parameters, temp)
+        prop_cache.blocks[(block, start_period)] = (U, steps)
+    else
+        U, steps = prop_cache.blocks[(block, start_period)]
+    end
+
+    return U, steps, temp
+end
+
+"""
+    build_block_propagator(block, start, prop_cache, parameters, temp)
 
 Generate a propagator for the entire 'block' including its repeats using the
-propagators in 'pulse_cache'. Return the propagator and the number of steps used.
+propagators in 'prop_cache'. Return the propagator and the number of steps used.
 """
-function propagate(block::Block, start,pulse_cache, parameters, temp)
+function build_block_propagator(block, start, prop_cache, parameters, temp)
     step_total = 0
-    Uelement,steps,temp = propagate(block.pulses[1], start+step_total, pulse_cache, parameters, temp)
+    Uelement,steps,temp = fetch_propagator(block.pulses[1], start+step_total, prop_cache, parameters, temp)
     U = copy(Uelement)
     step_total += steps
     for j = 1:block.repeats
         iter = j == 1 ? 2 : 1
         for n = iter:length(block.pulses)
-            Uelement, steps, temp = propagate(block.pulses[n], start+step_total, pulse_cache, parameters, temp)
+            Uelement, steps, temp = fetch_propagator(block.pulses[n], start+step_total, prop_cache, parameters, temp)
             mul!(temp, Uelement,U)
             step_total += steps
             U, temp = temp, U
@@ -39,7 +60,7 @@ function propagate(block::Block, start,pulse_cache, parameters, temp)
 end
 
 """
-    propagate_before_loop(sequence,loop,start_step,pulse_cache,parameters,temp)
+    propagate_before_loop(sequence, loop, start_step, prop_cache, parameters, temp)
 
 Generate a propagator for a group of non-looped pulse sequence elements in
 'sequence' prior to the looped element specified by 'loop'. The set of includede
@@ -48,7 +69,7 @@ lements starts just after the previous looped element or at the beginning of the
 at the end of the 'sequence' if 'loop' exceeds the number of looped elements in
 'sequence'.
 """
-function propagate_before_loop(sequence, loop, start_step, pulse_cache, parameters, temp)
+function propagate_before_loop(sequence, loop, start_step, prop_cache, parameters, temp)
     U = similar(temp)
     fill_diag!(U, 1)
     nonloop_steps = 0
@@ -60,7 +81,7 @@ function propagate_before_loop(sequence, loop, start_step, pulse_cache, paramete
     end_iter = loop>length(sequence.detection_loop) ? length(sequence.pulses) : sequence.detection_loop[loop]-1
 
     for n = start_iter:end_iter
-        U1, steps, temp = propagate(sequence.pulses[n], nonloop_steps+start_step, pulse_cache, parameters, temp)
+        U1, steps, temp = fetch_propagator(sequence.pulses[n], nonloop_steps+start_step, prop_cache, parameters, temp)
         mul!(temp, U1, U)
         U, temp = temp, U
         nonloop_steps += steps
@@ -107,7 +128,7 @@ struct PropagationGenerator{T<:Propagator}
     nonloop::PropagationChunk{NonLooped,T}
 end
 
-function build_looped(sequence::Sequence, loop, old_loop_steps, old_nonloop_steps, pulse_cache, parameters, temp::A) where {A}
+function build_looped(sequence::Sequence, loop, old_loop_steps, old_nonloop_steps, prop_cache, parameters, temp::A) where {A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
@@ -116,7 +137,7 @@ function build_looped(sequence::Sequence, loop, old_loop_steps, old_nonloop_step
     nonloop_steps = 0
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
-        U, nonloop_steps, temp = propagate_before_loop(sequence, loop, start, pulse_cache, parameters, temp)
+        U, nonloop_steps, temp = propagate_before_loop(sequence, loop, start, prop_cache, parameters, temp)
         push!(Unonlooped, U)
     end
     loop_element = sequence.pulses[sequence.detection_loop[loop]]
@@ -129,7 +150,7 @@ function build_looped(sequence::Sequence, loop, old_loop_steps, old_nonloop_step
     for n = 1:old_loop_cycle
         for j = 1:loop_cycle
             start = old_nonloop_steps+nonloop_steps+(n-1)*old_loop_steps+(j-1)*loop_steps
-            Uloop,_,temp = propagate(loop_element, start+(n-1)*loop_steps, pulse_cache, parameters, temp)
+            Uloop,_,temp = fetch_propagator(loop_element, start+(n-1)*loop_steps, prop_cache, parameters, temp)
             Uloops[n,j] = Uloop
         end
     end
@@ -162,11 +183,11 @@ function build_looped(sequence::Sequence, loop, old_loop_steps, old_nonloop_step
     return chunk, old_loop_steps+loop_steps, old_nonloop_steps+nonloop_steps, temp
 end
 
-function build_first_looped(sequence::Sequence, pulse_cache, parameters, temp::A) where {A}
+function build_first_looped(sequence::Sequence, prop_cache, parameters, temp::A) where {A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
-    U, nonloop_steps, temp=propagate_before_loop(sequence, 1, 1, pulse_cache, parameters, temp)
+    U, nonloop_steps, temp=propagate_before_loop(sequence, 1, 1, prop_cache, parameters, temp)
     nonloop_steps += 1
     initial = [U]
 
@@ -179,14 +200,14 @@ function build_first_looped(sequence::Sequence, pulse_cache, parameters, temp::A
 
     Uloops = Vector{A}()
     for n = 1:loop_cycle
-        Uloop, _, temp = propagate(loop_element, nonloop_steps+(n-1)*loop_steps, pulse_cache, parameters, temp)
+        Uloop, _, temp = fetch_propagator(loop_element, nonloop_steps+(n-1)*loop_steps, prop_cache, parameters, temp)
         push!(Uloops, Uloop)
     end
 
     return PropagationChunk{FirstLooped}(initial, [Uloops]), loop_steps, nonloop_steps, temp
 end
 
-function build_nonlooped(sequence::Sequence, loop, old_loop_steps, old_nonloop_steps, pulse_cache, parameters, temp::A) where {A}
+function build_nonlooped(sequence::Sequence, loop, old_loop_steps, old_nonloop_steps, prop_cache, parameters, temp::A) where {A}
     period_steps = parameters.period_steps
 
     old_loop_cycle = (old_loop_steps == 0) ? 1 : div(lcm(old_loop_steps, period_steps), old_loop_steps)
@@ -194,7 +215,7 @@ function build_nonlooped(sequence::Sequence, loop, old_loop_steps, old_nonloop_s
     nonloop_steps = 0
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
-        U, nonloop_steps, temp = propagate_before_loop(sequence, loop, start, pulse_cache, parameters, temp)
+        U, nonloop_steps, temp = propagate_before_loop(sequence, loop, start, prop_cache, parameters, temp)
         push!(Unonlooped, U)
     end
 

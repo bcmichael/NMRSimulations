@@ -408,7 +408,9 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
             temp = γiterate_pulse_propagators!(pulse_cache, parameters, n, temp)
         end
 
-        prop_generator, temp = build_generator(sequence, pulse_cache, parameters, temp)
+        block_cache = Dict{Tuple{Block, Int}, Tuple{typeof(temp),Int}}()
+        prop_cache = (pulses=pulse_cache, blocks=block_cache)
+        prop_generator, temp = build_generator(sequence, prop_cache, parameters, temp)
         spec, Uloop, temp = propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
     end
     return spec

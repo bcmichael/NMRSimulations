@@ -1,4 +1,4 @@
-import Base: +, *, convert, keys, haskey, copy, copyto!, similar
+import Base: +, *, convert, keys, haskey, copy, copyto!, similar, hash, isequal
 
 struct SphericalTensor{T}
     s00::T
@@ -112,6 +112,12 @@ function duration(block::Block{T}) where {T}
     total *= block.repeats
     return total
 end
+
+# Tuple{Block,Int} is the type used for dict keys to cache Block propagators
+# The propagator only depends on the contents of the Block and the start step
+# The simplest way to hash/compare based on the contents instead of the object id is to use the string representation
+hash(x::Tuple{Block,Int}) = hash(string(x))
+isequal(a::Tuple{Block,Int}, b::Tuple{Block,Int}) = isequal(string(a), string(b))
 
 struct Sequence{T<:AbstractFloat,N}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}
