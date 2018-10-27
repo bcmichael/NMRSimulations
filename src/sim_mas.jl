@@ -84,6 +84,55 @@ function propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
     return spec, Uloop, temp
 end
 
+function find_pulses!(pulse_cache, pulse::Pulse, start, parameters) where {T,N}
+    period_steps = parameters.period_steps
+    step_size = parameters.step_size
+
+    steps = Int(pulse.t/step_size)
+    rf = pulse.γB1
+    if ! haskey(pulse_cache, rf)
+        add_rf!(pulse_cache, rf)
+    end
+
+    timing = (mod1(start, period_steps), steps)
+    if ! haskey(pulse_cache[rf].timings, timing)
+        add_timing!(pulse_cache[rf], timing)
+    end
+
+    push!(pulse_cache[rf].timings[timing].phases, pulse.phase)
+    return steps
+end
+
+function find_pulses!(pulse_cache, block::Block, start, parameters)
+    step_total = 0
+    for j = 1:block.repeats
+        for n = 1:length(block.pulses)
+            step_total += find_pulses!(pulse_cache, block.pulses[n], start+step_total, parameters)
+        end
+    end
+    return step_total
+end
+
+function find_pulses!(pulse_cache, prop_generator::PropagationGenerator, parameters)
+    find_pulses!(pulse_cache, prop_generator.first, parameters)
+    for chunk in prop_generator.loops
+        find_pulses!(pulse_cache, chunk, parameters)
+    end
+    find_pulses!(pulse_cache, prop_generator.nonloop, parameters)
+    return pulse_cache
+end
+
+function find_pulses!(pulse_cache, chunk::PropagationChunk, parameters)
+    for elements in (chunk.initial_elements, chunk.incrementor_elements)
+        for index in eachindex(elements)
+            if isassigned(elements, index)
+                find_pulses!(pulse_cache, elements[index][1], elements[index][2], parameters)
+            end
+        end
+    end
+    return pulse_cache
+end
+
 function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     occupied = Vector{Ti}()
     for n = 1:A.n
@@ -364,8 +413,9 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
 
     temp = similar(Hinternal.s00, Propagator)
 
+    prop_generator = build_generator(sequence, parameters, A)
     pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
-    prop_generator = build_generator!(pulse_cache, sequence, 1, parameters, A)
+    find_pulses!(pulse_cache, prop_generator, parameters)
     build_step_propagators!(pulse_cache, Hinternal, parameters)
     temp = combine_propagators!(pulse_cache, parameters, temp)
     temp = build_pulse_props!(pulse_cache, parameters, temp)

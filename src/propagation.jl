@@ -133,7 +133,6 @@ struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N}
     nonloop::PropagationChunk{NonLooped,A,T,N}
 end
 
-
 function next!(A::PropagationGenerator, U, state, temp)
     Uchunk, temp = next!(A.first, state, temp)
     copyto!(U, Uchunk)
@@ -174,58 +173,26 @@ function next!(A::PropagationChunk{NonLooped}, state, temp)
     return A.current[index], temp
 end
 
-
-function find_pulses!(pulse_cache, pulse::Pulse, start, parameters) where {T,N}
-    period_steps = parameters.period_steps
-    step_size = parameters.step_size
-
-    steps = Int(pulse.t/step_size)
-    rf = pulse.γB1
-    if ! haskey(pulse_cache, rf)
-        add_rf!(pulse_cache, rf)
-    end
-
-    timing = (mod1(start, period_steps), steps)
-    if ! haskey(pulse_cache[rf].timings, timing)
-        add_timing!(pulse_cache[rf], timing)
-    end
-
-    push!(pulse_cache[rf].timings[timing].phases, pulse.phase)
-    return steps
-end
-
-function find_pulses!(pulse_cache, block::Block, start, parameters)
-    step_total = 0
-    for j = 1:block.repeats
-        for n = 1:length(block.pulses)
-            step_total += find_pulses!(pulse_cache, block.pulses[n], start+step_total, parameters)
-        end
-    end
-    return step_total
-end
-
 """
-    build_generator!(pulse_cache, sequence, start, parameters, A)
+    build_generator!(sequence, parameters, A)
 
 Build a generator which can subsequently be used to generate the propagators for
 each step of the detection loop of 'sequence'. 'A' is the type of Array to be
 used in the propagators.
 """
-function build_generator!(pulse_cache, sequence::Sequence{T,N}, start, parameters, ::Type{A}) where {T,N,A}
+function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
     detection_loop = sequence.detection_loop
     issorted(detection_loop) || error("detection loop must be sorted")
 
-    first_chunk, loop_steps, nonloop_steps = build_first_looped!(pulse_cache, sequence, parameters, A)
+    first_chunk, loop_steps, nonloop_steps = build_first_looped(sequence, parameters, A)
     loop_chunks = Vector{PropagationChunk{Looped,A,T,N}}()
     for n = 2:length(detection_loop)
-        chunk, loop_steps, nonloop_steps =
-            build_looped!(pulse_cache, sequence, n, loop_steps, nonloop_steps, parameters, A)
+        chunk, loop_steps, nonloop_steps = build_looped(sequence, n, loop_steps, nonloop_steps, parameters, A)
         push!(loop_chunks, chunk)
     end
 
     if detection_loop[end] < length(sequence.pulses)
-        last_chunk, loop_steps, nonloop_steps =
-            build_nonlooped!(pulse_cache, sequence, n, loop_steps, nonloop_steps, parameters, A)
+        last_chunk, loop_steps, nonloop_steps = build_nonlooped(sequence, n, loop_steps, nonloop_steps, parameters, A)
     else
         last_chunk = PropagationChunk{NonLooped,A,T,N}()
     end
@@ -234,7 +201,7 @@ function build_generator!(pulse_cache, sequence::Sequence{T,N}, start, parameter
 end
 
 """
-    build_before_loop(sequence, loop, start_step, prop_cache, parameters, temp)
+    build_before_loop(sequence, loop, parameters)
 
 Build a Block containing the non-looped pulse sequence elements in 'sequence'
 prior to the looped element specified by 'loop'. The set of included elements
@@ -244,7 +211,9 @@ at the end of the 'sequence' if 'loop' exceeds the number of looped elements in
 'sequence'. Return the Block and the length of the block in steps. If there are
 no such pulses return 'nothing' and '0'.
 """
-function build_before_loop!(pulse_cache, sequence, loop, start_step, parameters)
+function build_before_loop!(sequence, loop, parameters)
+    step_size = parameters.step_size
+
     # select the range of sequence elements to examine
     # for the first loop start at the beginning of the sequence otherwise just after the previous loop
     # if out of loops end at the end of the sequence otherwise just before the current loop
@@ -253,19 +222,19 @@ function build_before_loop!(pulse_cache, sequence, loop, start_step, parameters)
 
     if last_index > first_index
         element = Block(sequence.pulses[first_index:last_index])
-        nonloop_steps = find_pulses!(pulse_cache, element, start_step, parameters)
+        nonloop_steps = Int(duration(element)/step_size)
         return element, nonloop_steps
     else
         return nothing, 0
     end
 end
 
-function build_first_looped!(pulse_cache, sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
+function build_first_looped(sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
     initial_element = Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}(undef, 1)
-    nonloop_element, nonloop_steps = build_before_loop!(pulse_cache, sequence, 1, 1, parameters)
+    nonloop_element, nonloop_steps = build_before_loop!(sequence, 1, parameters)
     nonloop_steps += 1
     if nonloop_element != nothing
         initial_element[1] = (nonloop_element, 1)
@@ -281,7 +250,6 @@ function build_first_looped!(pulse_cache, sequence::Sequence{T,N}, parameters, :
     incrementor_elements = Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}(undef, 1, loop_cycle)
     for n = 1:loop_cycle
         start = nonloop_steps+(n-1)*loop_steps
-        find_pulses!(pulse_cache, loop_element, start, parameters)
         incrementor_elements[1, n] = (loop_element, start)
     end
 
@@ -289,7 +257,7 @@ function build_first_looped!(pulse_cache, sequence::Sequence{T,N}, parameters, :
     return chunk, loop_steps, nonloop_steps
 end
 
-function build_looped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
@@ -303,14 +271,13 @@ function build_looped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_step
     nonloop_steps = 0
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
-        nonloop_element, nonloop_steps = build_before_loop!(pulse_cache, sequence, loop, start, parameters)
+        nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
         if n == 1
             if nonloop_element != nothing
                 initial_elements[1] = (nonloop_element, 1)
             end
         else
             loop_block = Block([loop_element], n-1)
-            find_pulses!(pulse_cache, loop_block, start+nonloop_steps, parameters)
             if nonloop_element == nothing
                 initial_elements[n] = (loop_block, start)
             else
@@ -321,7 +288,6 @@ function build_looped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_step
         incrementor_block = Block([loop_element], incrementor_cycle)
         for j = 1:incrementor_cycle
             incrementor_start = start+n*loop_steps
-            find_pulses!(pulse_cache, incrementor_block, incrementor_start, parameters)
             incrementor_elements[n ,j] = (incrementor_block, incrementor_start)
         end
     end
@@ -329,7 +295,7 @@ function build_looped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_step
     return chunk, old_loop_steps+loop_steps, old_nonloop_steps+nonloop_steps
 end
 
-function build_nonlooped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
 
     old_loop_cycle = (old_loop_steps == 0) ? 1 : div(lcm(old_loop_steps, period_steps), old_loop_steps)
@@ -338,7 +304,7 @@ function build_nonlooped!(pulse_cache, sequence::Sequence{T,N}, loop, old_loop_s
 
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
-        nonloop_element, nonloop_steps = build_before_loop!(pulse_cache, sequence, loop, start, parameters)
+        nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
         initial[n] = (loop_element, start)
     end
 
@@ -362,7 +328,7 @@ function fill_generator!(prop_generator, prop_cache, parameters, temp)
 end
 
 """
-    fill_generator!(chunk, prop_cache, parameters, temp)
+    fill_chunk!(chunk, prop_cache, parameters, temp)
 
 Fill in the current and incrementor fields of 'chunk' with Propagators from
 'prop_cache' corresponding to the pulse sequence elements in the
