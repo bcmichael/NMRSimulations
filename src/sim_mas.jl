@@ -68,34 +68,6 @@ function eig_max_bound(A)
 end
 
 """
-    build_generator(sequence, pulse_cache, parameters, temp)
-
-Build a generator which can subsequently be used to generate the propagators for
-each step of the detection loop of 'sequence'.
-"""
-function build_generator(sequence::Sequence, pulse_cache, parameters, temp::A) where {A}
-    detection_loop = sequence.detection_loop
-    issorted(detection_loop) || error("detection loop must be sorted")
-
-    first_prop, loop_steps, nonloop_steps, temp = build_first_looped(sequence, pulse_cache, parameters, temp)
-    loop_props = Vector{PropagationChunk{Looped,A}}()
-    for n = 2:length(detection_loop)
-        prop, loop_steps, nonloop_steps, temp =
-            build_looped(sequence, n, loop_steps, nonloop_steps, pulse_cache, parameters, temp)
-        push!(loop_props, prop)
-    end
-
-    if detection_loop[end]<length(sequence.pulses)
-        last_prop, loop_steps, nonloop_steps, temp =
-            build_nonlooped(sequence, n, loop_steps, nonloop_steps, pulse_cache, parameters, temp)
-    else
-        last_prop = PropagationChunk{NonLooped}(Vector{A}(), Vector{Vector{A}}())
-    end
-    prop_generator = PropagationGenerator(first_prop, loop_props, last_prop)
-    return prop_generator, temp
-end
-
-"""
     propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
 
 Iterate through 'prop_generator' and calculate the signal using the resulting
@@ -393,7 +365,7 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     temp = similar(Hinternal.s00, Propagator)
 
     pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
-    find_pulses!(pulse_cache, sequence, 1, parameters)
+    prop_generator = build_generator!(pulse_cache, sequence, 1, parameters, A)
     build_step_propagators!(pulse_cache, Hinternal, parameters)
     temp = combine_propagators!(pulse_cache, parameters, temp)
     temp = build_pulse_props!(pulse_cache, parameters, temp)
@@ -410,7 +382,7 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
 
         block_cache = Dict{Tuple{Block, Int}, Tuple{typeof(temp),Int}}()
         prop_cache = (pulses=pulse_cache, blocks=block_cache)
-        prop_generator, temp = build_generator(sequence, prop_cache, parameters, temp)
+        prop_generator, temp = fill_generator!(prop_generator, prop_cache, parameters, temp)
         spec, Uloop, temp = propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
     end
     return spec
