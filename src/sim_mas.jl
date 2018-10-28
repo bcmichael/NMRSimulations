@@ -114,7 +114,6 @@ function find_pulses!(pulse_cache, block::Block, start, parameters)
 end
 
 function find_pulses!(pulse_cache, prop_generator::PropagationGenerator, parameters)
-    find_pulses!(pulse_cache, prop_generator.first, parameters)
     for chunk in prop_generator.loops
         find_pulses!(pulse_cache, chunk, parameters)
     end

@@ -76,7 +76,6 @@ function reorganize_repeated_block(block)
 end
 
 abstract type PropagationType end
-struct FirstLooped<:PropagationType end
 struct Looped<:PropagationType end
 struct NonLooped<:PropagationType end
 
@@ -99,12 +98,10 @@ intially hold propagators matching 'initial_elements', but will be altered
 by multiplication with the incrementors over the course of iteration thorugh
 the detection loop.
 
-The precise behaviour depends on the PropagationType. FirstLooped is for the
-first chunk of a sequence and therefore will have only one starting step.
-NonLooped is for a final chunk of the sequence which comes after all the looped
-elements. It can have multiple starting steps, but does not need any
-incrementors. Looped is for all other chunks and can have both multiple starting
-steps and incrementors.
+The precise behaviour depends on the PropagationType. NonLooped is for a final
+chunk of the sequence which comes after all the looped elements. It can have
+multiple starting steps, but does not need any incrementors. Looped is for all
+other chunks and can have both multiple starting steps and incrementors.
 """
 struct PropagationChunk{L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
     initial_elements::Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}
@@ -128,15 +125,14 @@ struct PropagationChunk{L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
 end
 
 struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N}
-    first::PropagationChunk{FirstLooped,A,T,N}
     loops::Vector{PropagationChunk{Looped,A,T,N}}
     nonloop::PropagationChunk{NonLooped,A,T,N}
 end
 
 function next!(A::PropagationGenerator, U, state, temp)
-    Uchunk, temp = next!(A.first, state, temp)
+    Uchunk, temp = next!(A.loops[1], state, temp)
     copyto!(U, Uchunk)
-    for n = 1:length(A.loops)
+    for n = 2:length(A.loops)
         Uchunk, temp = next!(A.loops[n], state,temp)
         mul!(temp, Uchunk, U)
         U, temp = temp, U
@@ -159,15 +155,6 @@ function next!(A::PropagationChunk{Looped}, state, temp)
     return A.current[index], temp
 end
 
-function next!(A::PropagationChunk{FirstLooped}, state, temp)
-    index = mod1(state-1, size(A.incrementors)[2])
-    if state > 1
-        mul!(temp, A.incrementors[1, index], A.current[1])
-        A.current[1], temp = temp, A.current[1]
-    end
-    return A.current[1], temp
-end
-
 function next!(A::PropagationChunk{NonLooped}, state, temp)
     index = mod1(state, length(A.current))
     return A.current[index], temp
@@ -184,9 +171,10 @@ function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {
     detection_loop = sequence.detection_loop
     issorted(detection_loop) || error("detection loop must be sorted")
 
-    first_chunk, loop_steps, nonloop_steps = build_first_looped(sequence, parameters, A)
+    loop_steps = 0
+    nonloop_steps = 1
     loop_chunks = Vector{PropagationChunk{Looped,A,T,N}}()
-    for n = 2:length(detection_loop)
+    for n = 1:length(detection_loop)
         chunk, loop_steps, nonloop_steps = build_looped(sequence, n, loop_steps, nonloop_steps, parameters, A)
         push!(loop_chunks, chunk)
     end
@@ -196,7 +184,7 @@ function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {
     else
         last_chunk = PropagationChunk{NonLooped,A,T,N}()
     end
-    prop_generator = PropagationGenerator(first_chunk, loop_chunks, last_chunk)
+    prop_generator = PropagationGenerator(loop_chunks, last_chunk)
     return prop_generator
 end
 
@@ -229,34 +217,6 @@ function build_before_loop!(sequence, loop, parameters)
     end
 end
 
-function build_first_looped(sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
-    period_steps = parameters.period_steps
-    step_size = parameters.step_size
-
-    initial_element = Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}(undef, 1)
-    nonloop_element, nonloop_steps = build_before_loop!(sequence, 1, parameters)
-    nonloop_steps += 1
-    if nonloop_element != nothing
-        initial_element[1] = (nonloop_element, 1)
-    end
-
-    loop_element = sequence.pulses[sequence.detection_loop[1]]
-    loop_steps = Int(duration(loop_element)/step_size)
-    loop_cycle = div(lcm(loop_steps,period_steps), loop_steps)
-    if loop_cycle >= sequence.repeats
-        loop_cycle = sequence.repeats-1
-    end
-
-    incrementor_elements = Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}(undef, 1, loop_cycle)
-    for n = 1:loop_cycle
-        start = nonloop_steps+(n-1)*loop_steps
-        incrementor_elements[1, n] = (loop_element, start)
-    end
-
-    chunk = PropagationChunk{FirstLooped,A}(initial_element, incrementor_elements)
-    return chunk, loop_steps, nonloop_steps
-end
-
 function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
@@ -284,7 +244,7 @@ function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop
                 initial_elements[n] = (Block([nonloop_element, loop_block]), start)
             end
         end
-        
+
         incrementor_block = Block([loop_element], old_loop_cycle)
         steps_before_incrementors = start+(n-1)*loop_steps+nonloop_steps
         for j = 1:incrementor_cycle
@@ -320,7 +280,6 @@ end
 Fill in the Propagators in each PropagationChunk in 'prop_generator'.
 """
 function fill_generator!(prop_generator, prop_cache, parameters, temp)
-    _, temp = fill_chunk!(prop_generator.first, prop_cache, parameters, temp)
     for chunk in prop_generator.loops
         chunk, temp = fill_chunk!(chunk, prop_cache, parameters, temp)
     end
