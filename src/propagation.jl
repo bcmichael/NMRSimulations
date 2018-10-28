@@ -274,7 +274,7 @@ function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop
         nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
         if n == 1
             if nonloop_element != nothing
-                initial_elements[1] = (nonloop_element, 1)
+                initial_elements[1] = (nonloop_element, start)
             end
         else
             loop_block = Block([loop_element], n-1)
@@ -284,10 +284,11 @@ function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop
                 initial_elements[n] = (Block([nonloop_element, loop_block]), start)
             end
         end
-
-        incrementor_block = Block([loop_element], incrementor_cycle)
+        
+        incrementor_block = Block([loop_element], old_loop_cycle)
+        steps_before_incrementors = start+(n-1)*loop_steps+nonloop_steps
         for j = 1:incrementor_cycle
-            incrementor_start = start+n*loop_steps
+            incrementor_start = steps_before_incrementors+(j-1)*loop_steps*old_loop_cycle
             incrementor_elements[n ,j] = (incrementor_block, incrementor_start)
         end
     end
