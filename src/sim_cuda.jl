@@ -45,14 +45,14 @@ struct CuSparseMatrixCSC{Tv,Ti<:Integer}
     end
 end
 
-function propagate!(spec::CuArray, Uloop, ρ0, detector, prop_generator, temp)
+function propagate!(spec::CuArray, Uloop, ρ0, detector, prop_generator, parameters)
     state = 1
     for n = 1:size(spec, 2)
-        Uloop, state, temp = next!(prop_generator, Uloop, state, temp)
-        spec = detect!(spec, Uloop, ρ0, detector, detector.occupied_cols, n, temp)
+        Uloop, state = next!(prop_generator, Uloop, state, parameters.temps)
+        spec = detect!(spec, Uloop, ρ0, detector, detector.occupied_cols, n, parameters.temps[1])
     end
 
-    return spec, Uloop, temp
+    return spec, Uloop
 end
 
 function detect!(spec::CuArray, Uloop::HilbertOperator{T1,CuArray{T,3}}, ρ0::CuSparseMatrixCSC,

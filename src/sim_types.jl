@@ -158,13 +158,14 @@ struct CPUMultiProcess <: CPUMode end
 struct GPUBatchedMode <: GPUMode end
 struct GPUSingleMode <: GPUMode end
 
-struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat}
+struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray}
     period_steps::Int
     step_size::T
     nγ::Int
     γ_steps::Int
     angles::EulerAngles{T}
     xyz::Vector{Array{Complex{T},2}}
+    temps::Vector{Propagator{T,A}}
 
     function SimulationParameters{M,T}(period_steps::Integer,step_size,nγ::Integer,spins) where {M<:CalculationMode,T<:AbstractFloat}
         γ_steps = Int(period_steps/nγ)
@@ -176,7 +177,14 @@ struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat}
         channels = check_spins(spins)
         xyz=channel_XYZ(spins, channels, x, y, z)
 
-        new{M,T}(period_steps, step_size, nγ, γ_steps, angles, xyz)
+        if M <: CPUMode
+            A = Array{Complex{T},3}
+        elseif M <: GPUMode
+            A = CuArray{Complex{T},3}
+        end
+        temps = Vector{Propagator{T,A}}()
+
+        new{M,T,A}(period_steps, step_size, nγ, γ_steps, angles, xyz, temps)
     end
 
     SimulationParameters{M}(period_steps, step_size ,nγ, spins) where M<:CalculationMode =

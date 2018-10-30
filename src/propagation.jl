@@ -1,10 +1,10 @@
 """
-    fetch_propagator(pulse, start, prop_cache, parameters, temp)
+    fetch_propagator(pulse, start, prop_cache, parameters)
 
 Fetch the propagator corresponding to a given 'pulse' and 'start' step from
 'prop_cache'. Return the propagator and the number of steps used.
 """
-function fetch_propagator(pulse::Pulse, start, prop_cache, parameters, temp)
+function fetch_propagator(pulse::Pulse, start, prop_cache, parameters)
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyzs = parameters.xyz
@@ -12,53 +12,52 @@ function fetch_propagator(pulse::Pulse, start, prop_cache, parameters, temp)
     steps = Int(pulse.t/step_size)
     timing = (mod1(start, period_steps), steps)
     propagator = prop_cache.pulses[pulse.γB1].timings[timing].phased[pulse.phase]
-    return propagator, steps, temp
+    return propagator, steps
 end
 
 """
-    fetch_propagator(block, start, prop_cache, parameters, temp)
+    fetch_propagator(block, start, prop_cache, parameters)
 
 Fetch the propagator corresponding to a given 'block' and 'start' step from
 'prop_cache'. If the propagator is not in 'prop_cache', generate it and add it
 to the cache. Return the propagator and the number of steps used.
 """
-function fetch_propagator(block::Block, start, prop_cache, parameters, temp)
+function fetch_propagator(block::Block, start, prop_cache, parameters)
     period_steps = parameters.period_steps
 
     start_period = mod1(start, period_steps)
     if !((block, start_period) in keys(prop_cache.blocks))
-        U, steps, temp = build_block_propagator(block, start_period, prop_cache, parameters, temp)
+        U, steps = build_block_propagator(block, start_period, prop_cache, parameters)
         prop_cache.blocks[(block, start_period)] = (U, steps)
     else
         U, steps = prop_cache.blocks[(block, start_period)]
     end
-
-    return U, steps, temp
+    return U, steps
 end
 
 """
-    build_block_propagator(block, start, prop_cache, parameters, temp)
+    build_block_propagator(block, start, prop_cache, parameters)
 
 Generate a propagator for the entire 'block' including its repeats using the
 propagators in 'prop_cache'. Return the propagator and the number of steps used.
 """
-function build_block_propagator(block, start, prop_cache, parameters, temp)
+function build_block_propagator(block, start, prop_cache, parameters)
     step_total = 0
     if block.repeats > 1
         # This reorganization ensures that each repeat gets treated as a block for caching purposes
         block = reorganize_repeated_block(block)
     end
 
-    Uelement, steps, temp = fetch_propagator(block.pulses[1], start, prop_cache, parameters, temp)
+    Uelement, steps = fetch_propagator(block.pulses[1], start, prop_cache, parameters)
     U = copy(Uelement)
     step_total += steps
     for element in block.pulses[2:end]
-        Uelement, steps, temp = fetch_propagator(element, start+step_total, prop_cache, parameters, temp)
-        mul!(temp, Uelement,U)
+        Uelement, steps = fetch_propagator(element, start+step_total, prop_cache, parameters)
+        mul!(parameters.temps[1], Uelement,U)
         step_total += steps
-        U, temp = temp, U
+        U, parameters.temps[1] = parameters.temps[1], U
     end
-    return U, step_total, temp
+    return U, step_total
 end
 
 """
@@ -129,35 +128,35 @@ struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N}
     nonloop::PropagationChunk{NonLooped,A,T,N}
 end
 
-function next!(A::PropagationGenerator, U, state, temp)
-    Uchunk, temp = next!(A.loops[1], state, temp)
+function next!(A::PropagationGenerator, U, state, temps)
+    Uchunk = next!(A.loops[1], state, temps)
     copyto!(U, Uchunk)
     for n = 2:length(A.loops)
-        Uchunk, temp = next!(A.loops[n], state,temp)
-        mul!(temp, Uchunk, U)
-        U, temp = temp, U
+        Uchunk = next!(A.loops[n], state, temps)
+        mul!(temps[1], Uchunk, U)
+        U, temps[1] = temps[1], U
     end
     if length(A.nonloop.current)>0
-        Uchunk, temp = next!(A.nonloop, state,temp)
-        mul!(temp, Uchunk, U)
-        U, temp = temp, U
+        Uchunk = next!(A.nonloop, state)
+        mul!(temps[1], Uchunk, U)
+        U, temps[1] = temps[1], U
     end
-    return U, state+1, temp
+    return U, state+1
 end
 
-function next!(A::PropagationChunk{Looped}, state, temp)
+function next!(A::PropagationChunk{Looped}, state, temps)
     index = mod1(state, length(A.current))
     inc_index = mod1(fld1(state, length(A.current))-1, size(A.incrementors)[2])
     if state > length(A.current)
-        mul!(temp, A.incrementors[index, inc_index], A.current[index])
-        A.current[index], temp = temp, A.current[index]
+        mul!(temps[1], A.incrementors[index, inc_index], A.current[index])
+        A.current[index], temps[1] = temps[1], A.current[index]
     end
-    return A.current[index], temp
+    return A.current[index]
 end
 
-function next!(A::PropagationChunk{NonLooped}, state, temp)
+function next!(A::PropagationChunk{NonLooped}, state)
     index = mod1(state, length(A.current))
-    return A.current[index], temp
+    return A.current[index]
 end
 
 """
@@ -275,38 +274,38 @@ function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonl
 end
 
 """
-    fill_generator!(prop_generator, prop_cache, parameters, temp)
+    fill_generator!(prop_generator, prop_cache, parameters)
 
 Fill in the Propagators in each PropagationChunk in 'prop_generator'.
 """
-function fill_generator!(prop_generator, prop_cache, parameters, temp)
+function fill_generator!(prop_generator, prop_cache, parameters)
     for chunk in prop_generator.loops
-        chunk, temp = fill_chunk!(chunk, prop_cache, parameters, temp)
+        fill_chunk!(chunk, prop_cache, parameters)
     end
-    _, temp = fill_chunk!(prop_generator.nonloop, prop_cache, parameters, temp)
-    return prop_generator, temp
+    fill_chunk!(prop_generator.nonloop, prop_cache, parameters)
+    return prop_generator
 end
 
 """
-    fill_chunk!(chunk, prop_cache, parameters, temp)
+    fill_chunk!(chunk, prop_cache, parameters)
 
 Fill in the current and incrementor fields of 'chunk' with Propagators from
 'prop_cache' corresponding to the pulse sequence elements in the
 initial_elements and incrementor_elements fields.
 """
-function fill_chunk!(chunk, prop_cache, parameters, temp)
-    _, temp = fill_array!(chunk.current, chunk.initial_elements, prop_cache, parameters, temp)
-    _, temp = fill_array!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters, temp)
-    return chunk, temp
+function fill_chunk!(chunk, prop_cache, parameters)
+    fill_array!(chunk.current, chunk.initial_elements, prop_cache, parameters)
+    fill_array!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
+    return chunk
 end
 
-function fill_array!(props, elements, prop_cache, parameters, temp)
+function fill_array!(props, elements, prop_cache, parameters)
     for index in eachindex(elements)
         if isassigned(elements, index)
-            props[index],_,temp = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters, temp)
+            props[index],_ = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters)
         else
-            props[index] = fill_diag!(similar(temp), 1)
+            props[index] = fill_diag!(similar(parameters.temps[1]), 1)
         end
     end
-    return props, temp
+    return props
 end

@@ -68,20 +68,20 @@ function eig_max_bound(A)
 end
 
 """
-    propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
+    propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
 
 Iterate through 'prop_generator' and calculate the signal using the resulting
 propagators, the 'detector' operator, and the initial density operator 'ρ0'.
 """
-function propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
+function propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
     unique_cols = occupied_columns(detector)
     state = 1
     for n = 1:size(spec, 2)
-        Uloop,state,temp = next!(prop_generator, Uloop, state, temp)
-        spec = detect!(spec, Uloop, ρ0, detector, unique_cols, n, temp)
+        Uloop, state = next!(prop_generator, Uloop, state, parameters.temps)
+        spec = detect!(spec, Uloop, ρ0, detector, unique_cols, n, parameters.temps[1])
     end
 
-    return spec, Uloop, temp
+    return spec, Uloop
 end
 
 function find_pulses!(pulse_cache, pulse::Pulse, start, parameters) where {T,N}
@@ -140,7 +140,7 @@ function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     return occupied
 end
 
-function combine_propagators!(pulse_cache, parameters, temp)
+function combine_propagators!(pulse_cache, parameters)
     γ_steps = parameters.γ_steps
 
     for rf in values(pulse_cache)
@@ -149,17 +149,18 @@ function combine_propagators!(pulse_cache, parameters, temp)
             push!(a, (mod1(timing[1], γ_steps), mod(timing[2], γ_steps)))
         end
         for combination in a
-            rf.combinations[combination], temp =
-                combine_propagators(rf.step_propagators, combination, parameters, temp)
+            rf.combinations[combination] =
+                combine_propagators(rf.step_propagators, combination, parameters)
         end
     end
-    return temp
+    return pulse_cache
 end
 
-function combine_propagators(propagators::A, combination, parameters, temp) where {A}
+function combine_propagators(propagators::A, combination, parameters) where {A}
     period_steps = parameters.period_steps
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
+    temp = parameters.temps[1]
 
     combinations = A()
 
@@ -192,23 +193,25 @@ function combine_propagators(propagators::A, combination, parameters, temp) wher
             push!(combinations, U2)
         end
     end
-    return combinations, temp
+    parameters.temps[1] = temp
+    return combinations
 end
 
-function build_pulse_props!(pulse_cache, parameters, temp)
+function build_pulse_props!(pulse_cache, parameters)
     for rf in values(pulse_cache)
         for timing in keys(rf.timings)
-            unphased, temp = build_propagator!(similar(temp), rf, timing, parameters, temp)
+            unphased = build_propagator!(similar(parameters.temps[1]), rf, timing, parameters)
             push!(rf.timings[timing].unphased, unphased)
         end
     end
     generate_phased_propagators!(pulse_cache, parameters)
-    return temp
+    return pulse_cache
 end
 
-function build_propagator!(U, rf, timing, parameters, temp)
+function build_propagator!(U, rf, timing, parameters)
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
+    temp = parameters.temps[1]
 
     combinations = rf.combinations[(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
 
@@ -242,7 +245,8 @@ function build_propagator!(U, rf, timing, parameters, temp)
         mul!(temp, remainder, U)
         U, temp = temp, U
     end
-    return U, temp
+    parameters.temps[1] = temp
+    return U
 end
 
 function generate_phased_propagators!(pulse_cache, parameters)
@@ -264,9 +268,10 @@ function generate_phased_propagators!(pulse_cache, parameters)
             end
         end
     end
+    return pulse_cache
 end
 
-function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration, temp)
+function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration)
     γ_steps = parameters.γ_steps
 
     for rf in values(pulse_cache)
@@ -274,20 +279,21 @@ function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration, tem
             timing, timing_collection = timing_pair
             if timing[2] <= 2*γ_steps
                 iterated_timing = tuple(timing[1]+γ_steps*(γ_iteration-1),timing[2])
-                timing_collection.unphased[1], temp =
-                    build_propagator!(timing_collection.unphased[1], rf, iterated_timing, parameters, temp)
+                timing_collection.unphased[1] =
+                    build_propagator!(timing_collection.unphased[1], rf, iterated_timing, parameters)
             else
-                γiterate_propagator!(timing_collection.unphased[1], rf, timing, parameters, γ_iteration, temp)
+                γiterate_propagator!(timing_collection.unphased[1], rf, timing, parameters, γ_iteration)
             end
         end
     end
     generate_phased_propagators!(pulse_cache, parameters)
-    return temp
+    return pulse_cache
 end
 
-function γiterate_propagator!(U, rf, timing, parameters, γ_iteration, temp)
+function γiterate_propagator!(U, rf, timing, parameters, γ_iteration)
     γ_steps = parameters.γ_steps
     nγ = parameters.nγ
+    temp = parameters.temps[1]
 
     combinations = rf.combinations[(mod1(timing[1], γ_steps), mod(timing[2], γ_steps))]
 
@@ -306,6 +312,7 @@ function γiterate_propagator!(U, rf, timing, parameters, γ_iteration, temp)
         mul!(temp, combinations[mod1(stop+1,2*nγ)], U)
         mul!(U, combinations[mod1(stop+2,2*nγ)], temp)
     end
+    return U
 end
 
 function build_step_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
@@ -322,6 +329,7 @@ function build_step_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamilto
     for rf_pair in pulse_cache
         step_propagators!(rf_pair, Hrotated, parameters, temps)
     end
+    return pulse_cache
 end
 
 function step_propagators!(rf_pair, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
@@ -411,13 +419,14 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     nγ = parameters.nγ
 
     temp = similar(Hinternal.s00, Propagator)
+    push!(parameters.temps, temp)
 
     prop_generator = build_generator(sequence, parameters, A)
     pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
     find_pulses!(pulse_cache, prop_generator, parameters)
     build_step_propagators!(pulse_cache, Hinternal, parameters)
-    temp = combine_propagators!(pulse_cache, parameters, temp)
-    temp = build_pulse_props!(pulse_cache, parameters, temp)
+    combine_propagators!(pulse_cache, parameters)
+    build_pulse_props!(pulse_cache, parameters)
 
     if M <: GPUBatchedMode
         GC.gc()
@@ -426,13 +435,13 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     Uloop = similar(temp)
     for n = 1:nγ
         if n != 1
-            temp = γiterate_pulse_propagators!(pulse_cache, parameters, n, temp)
+            γiterate_pulse_propagators!(pulse_cache, parameters, n)
         end
 
         block_cache = Dict{Tuple{Block, Int}, Tuple{typeof(temp),Int}}()
         prop_cache = (pulses=pulse_cache, blocks=block_cache)
-        prop_generator, temp = fill_generator!(prop_generator, prop_cache, parameters, temp)
-        spec, Uloop, temp = propagate!(spec, Uloop, ρ0, detector, prop_generator, temp)
+        prop_generator = fill_generator!(prop_generator, prop_cache, parameters)
+        spec, Uloop = propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
     end
     return spec
 end
