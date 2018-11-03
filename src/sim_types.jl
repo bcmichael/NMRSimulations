@@ -115,9 +115,32 @@ end
 
 # Tuple{Block,Int} is the type used for dict keys to cache Block propagators
 # The propagator only depends on the contents of the Block and the start step
-# The simplest way to hash/compare based on the contents instead of the object id is to use the string representation
-hash(x::Tuple{Block,Int}) = hash(string(x))
-isequal(a::Tuple{Block,Int}, b::Tuple{Block,Int}) = isequal(string(a), string(b))
+# hash/compare must be based on the contents instead of the object id
+hash(x::Tuple{Block,Int}) = hash((collapse_element(x[1]), x[2]))
+isequal(a::Tuple{Block,Int}, b::Tuple{Block,Int}) =
+    isequal((collapse_element(a[1]), a[2]), (collapse_element(b[1]), b[2]))
+
+function collapse_element(block::Block{T,N}) where {T,N}
+    pulses = Vector{Pulse{T,N}}()
+    for n in block.pulses
+        collapsed = collapse_element(n)
+        append!(pulses, collapsed)
+    end
+    pulses = repeat(pulses, block.repeats)
+    out = Vector{Pulse{T,N}}()
+    push!(out, pulses[1])
+    for n = 2:length(pulses)
+        if out[end].γB1 == pulses[n].γB1 && out[end].phase == pulses[n].phase
+            pulse = pop!(out)
+            push!(out, Pulse{T,N}(pulse.t+pulses[n].t, pulse.γB1, pulse.phase))
+        else
+            push!(out, pulses[n])
+        end
+    end
+    return out
+end
+
+collapse_element(pulse::Pulse) = [pulse]
 
 struct Sequence{T<:AbstractFloat,N}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}
