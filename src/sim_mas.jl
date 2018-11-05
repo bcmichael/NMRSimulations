@@ -261,9 +261,7 @@ function generate_phased_propagators!(pulse_cache, parameters)
                 if all(phase .== 0)
                     copyto!(timing.phased[phase], unphased)
                 else
-                    A = typeof(unphased.data)
-                    rotator = array_wrapper_type(A)(phase_rotator(phase, parameters.xyz))
-                    rotate!(timing.phased[phase], unphased, rotator)
+                    phase_rotate!(timing.phased[phase], unphased, phase, parameters)
                 end
             end
         end

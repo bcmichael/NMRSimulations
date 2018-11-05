@@ -103,8 +103,10 @@ function scaledn!(X::HilbertOperator,s::Number)
     X
 end
 
-function rotate!(A::HilbertOperator, B::HilbertOperator, C::AbstractMatrix)
-    A.data .= B.data.*C
+function phase_rotate!(A::HilbertOperator, B::HilbertOperator, phase, parameters)
+    At = typeof(A.data)
+    rotator = array_wrapper_type(At)(phase_rotator(phase, parameters.xyz))
+    A.data .= B.data.*rotator
     return A
 end
 
