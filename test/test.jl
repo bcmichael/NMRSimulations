@@ -111,9 +111,9 @@ include("examples.jl")
         end
 
         @testset "Math" begin
-            a=Propagator(rand(Complex{Float64},4,4,1))
-            b=Propagator(rand(Complex{Float64},4,4,1))
-            c=Propagator(rand(Complex{Float64},4,4,1))
+            a=Propagator(rand(Complex{Float64},4,4))
+            b=Propagator(rand(Complex{Float64},4,4))
+            c=Propagator(rand(Complex{Float64},4,4))
             mul!(c,a,b)
             @test a.data[:,:,1]*b.data[:,:,1]==c.data[:,:,1]
             mul!(c,a,b,'N','C')
@@ -121,7 +121,7 @@ include("examples.jl")
             mul!(c,a,b,2,0)
             @test 2*a.data[:,:,1]*b.data[:,:,1]==c.data[:,:,1]
 
-            d = dropdims(b.data, dims=3)^(4)
+            d = b.data^(4)
             pow!(a, b, 4, c)
             @test all(a.data .== d)
         end
@@ -355,8 +355,8 @@ end
 
     @testset "expm_cheby" begin
         for n=1:2,T in (Float64,Float32)
-            temps=[Hamiltonian(rand(T,(2^n,2^n,1))) for j in 1:2]
-            for a in (rand(T,(2^n,2^n,1)),)
+            temps=[Hamiltonian(rand(T,(2^n,2^n))) for j in 1:2]
+            for a in (rand(T,(2^n,2^n)),)
                 b=exp(-2*pi*im*a[:,:,1]*1E-6)
                 @test expm_cheby(Hamiltonian(a),1E-6,temps).data≈b atol=1E-4
             end

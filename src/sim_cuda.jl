@@ -55,7 +55,7 @@ function propagate!(spec::CuArray, Uloop, ρ0, detector, prop_generator, paramet
     return spec, Uloop
 end
 
-function detect!(spec::CuArray, Uloop::HilbertOperator{T1,CuArray{T,3}}, ρ0::CuSparseMatrixCSC,
+function detect!(spec::CuArray, Uloop::HilbertOperator{T1,<:CuArray{T}}, ρ0::CuSparseMatrixCSC,
     detector::CuSparseMatrixCSC, unique_cols, loop,temp) where {T,T1}
 
     x,num = operator_iter(Uloop)
@@ -125,14 +125,15 @@ end
     return val
 end
 
-function eig_max_bound(A::CuArray{T,3}) where {T}
-    x, y, z = size(A)
+function eig_max_bound(A::CuArray{T}) where {T}
+    x = size(A, 1)
+    z = size(A, 3)
     results = CuArray{T}(z)
     @cuda blocks=z threads=x shmem=sizeof(T)*z kernel_eig_max_bound(A, results)
     return maximum(Array(results))
 end
 
-function kernel_eig_max_bound(A::CuDeviceArray{T,3}, results) where {T}
+function kernel_eig_max_bound(A::CuDeviceArray{T}, results) where {T}
     shared = @cuDynamicSharedMem(T, fld1(blockDim().x, 32))
 
     val = T(0)
@@ -177,14 +178,15 @@ end
     return val
 end
 
-function threshold(A::CuArray{T,3}, thresh::T) where {T}
-    x, y, z = size(A)
+function threshold(A::CuArray{T}, thresh::T) where {T}
+    x = size(A, 1)
+    z = size(A, 3)
     results = CuArray{Bool}(z)
     @cuda blocks=z threads=x shmem=sizeof(Bool) kernel_threshold(A, thresh, results)
     return all(Array(results))
 end
 
-function kernel_threshold(A::CuDeviceArray{T,3}, thresh::T, results) where {T}
+function kernel_threshold(A::CuDeviceArray{T}, thresh::T, results) where {T}
     shared = @cuDynamicSharedMem(Bool,1)
 
     if threadIdx().x == 1
@@ -266,7 +268,7 @@ end
 
 # This isn't an actual BLAS operation, because the arrays are different types, but we use this in expm_cheby
 # The fallback uses getindex, which is horribly slow for CuArrays so define a replacement with a CUDA kernel
-function axpy!(a::Number, X::CuArray{T,N}, Y::CuArray{Complex{T},N}) where {T,N}
+function axpy!(a::Number, X::CuArray{T}, Y::CuArray{Complex{T}}) where {T}
     if length(X) != length(Y)
         throw(DimensionMismatch("X has length $(length(X)), Y has length $(length(Y))"))
     end
@@ -276,7 +278,9 @@ function axpy!(a::Number, X::CuArray{T,N}, Y::CuArray{Complex{T},N}) where {T,N}
         a2 = Complex{T}(a)
     end
 
-    x, y, z = size(X)
+    x = size(X, 1)
+    y = size(X, 2)
+    z = size(X, 3)
     @cuda blocks=(y,z) threads=x kernel_generic_axpy(a2, X, Y)
     Y
 end

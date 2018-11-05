@@ -200,10 +200,12 @@ struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray
         channels = check_spins(spins)
         xyz=channel_XYZ(spins, channels, x, y, z)
 
-        if M <: CPUMode
-            A = Array{Complex{T},3}
-        elseif M <: GPUMode
+        if M == CPUSingleMode || M == CPUMultiProcess
+            A = Array{Complex{T},2}
+        elseif M == GPUBatchedMode
             A = CuArray{Complex{T},3}
+        elseif M == GPUSingleMode
+            A = CuArray{Complex{T},2}
         end
         temps = Vector{Propagator{T,A}}()
 

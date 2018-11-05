@@ -365,12 +365,15 @@ end
 Calculate the single element at coordinate ['row','col'] of the result of
 A[:,:,n]*B[:,:,n]'.
 """
-function A_mul_Bc_single_element(A::Array{T,3}, B::Array{T,3}, row, col, n) where {T}
-    x, y, z = size(A)
-    (x, y, z) == size(B) || throw(DimensionMismatch)
+function A_mul_Bc_single_element(A::At, B::At, row, col, n) where {T,At<:Union{Array{T,2},Array{T,3}}}
+    size(A) == size(B) || throw(DimensionMismatch)
+    x = size(A, 1)
+    y = size(A, 2)
+    z = size(A, 3)
     x == y || throw(DimensionMismatch)
     row <= x || throw(DomainError)
     col <= x || throw(DomainError)
+    n <= z || throw(DomainError)
 
     out = zero(T)
     @inbounds for m = 1:x

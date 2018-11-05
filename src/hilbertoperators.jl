@@ -19,15 +19,11 @@ end
 
 Hamiltonian(x::A) where {A} = Hamiltonian{get_precision(x),A}(x)
 
-function Hamiltonian(s::SphericalTensor{A}) where {T,A<:AbstractArray{T,2}}
-    x, y = size(s.s00)
-    SphericalTensor([Hamiltonian(reshape(getfield(s, name), x, y, 1)) for name in fieldnames(SphericalTensor)]...)
-end
+Hamiltonian(s::SphericalTensor{A}) where {T,A<:AbstractArray{T,2}} =
+    SphericalTensor([Hamiltonian(getfield(s, name)) for name in fieldnames(SphericalTensor)]...)
 
-function Hamiltonian(s::SphericalTensor{A}, ::Type{Ar}) where {T,A<:AbstractArray{T,2},Ar<:AbstractArray}
-    x, y = size(s.s00)
-    SphericalTensor([Hamiltonian(Ar(reshape(getfield(s, name), x, y, 1))) for name in fieldnames(SphericalTensor)]...)
-end
+Hamiltonian(s::SphericalTensor{A}, ::Type{Ar}) where {T,A<:AbstractArray{T,2},Ar<:AbstractArray} =
+    SphericalTensor([Hamiltonian(Ar(getfield(s, name))) for name in fieldnames(SphericalTensor)]...)
 
 function Hamiltonian(x::Vector{<:SphericalTensor{A}}, ::Type{Ar}) where {A<:AbstractArray,Ar<:AbstractArray}
     fields = Vector{Ar}()
@@ -40,19 +36,19 @@ end
 
 Hamiltonian(x::Vector{<:SphericalTensor{A}}) where {A<:AbstractArray} = Hamiltonian(x,array_wrapper_type(A))
 
-function operator_iter(A::HilbertOperator)
-    x, y, z = size(A.data)
-    return x, z
-end
+operator_iter(A::HilbertOperator) = size(A.data, 1), size(A.data, 3)
 
 function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
     {T<:BLAS.BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
 
-    if size(A.data, 3) == 1
-        gemm!(transA, transB, T(alpha), dropdims(A.data,dims=3), dropdims(B.data,dims=3), T(beta), dropdims(C.data,dims=3))
-    else
-        square_strided_batch_gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
-    end
+    square_strided_batch_gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
+    C
+end
+
+function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
+    {T<:BLAS.BlasFloat,Ar<:AbstractArray{T,2},T1,H<:HilbertOperator{T1,Ar}}
+
+    gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
 end
 
