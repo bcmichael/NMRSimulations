@@ -79,6 +79,15 @@ struct Looped<:PropagationType end
 struct NonLooped<:PropagationType end
 
 """
+    SeqElement
+
+A SeqElement is a tuple containing either a Pulse or a Block and the step that
+it starts at. This is all the information needed to generate the actual
+propagator for this pulse sequence element.
+"""
+const SeqElement{T,N} = Tuple{Union{Pulse{T,N},Block{T,N}},Int} where {T,N}
+
+"""
     PropagationChunk
 
 A PropagationChunk corresponds to a chunk of a pulse sequence consisting of a
@@ -87,15 +96,14 @@ looped elements in previous chunks means that the chunk can have multiple
 different starting steps that occur cyclically over different iterations of the
 pulse sequence detection loop.
 
-The propagator corrseponding to the chunk for each iteration can be generated
+The propagator corresponding to the chunk for each iteration can be generated
 using the chunk propagator for the first instance of each starting step as well
 as a series of propagators to increment them for subsequent instances of that
-starting step. 'initial_elements' and 'incrementor_elements' hold tuples of
-pulse sequence elements and starting steps that correspond to these propagators,
-while 'current' and 'incrementors' hold the actual propagators. 'current' will
-intially hold propagators matching 'initial_elements', but will be altered
-by multiplication with the incrementors over the course of iteration thorugh
-the detection loop.
+starting step. 'initial_elements' and 'incrementor_elements' hold SeqElement
+tuples that correspond to these propagators, while 'current' and 'incrementors'
+hold the actual propagators. 'current' will intially hold propagators matching
+'initial_elements', but will be altered by multiplication with the incrementors
+over the course of iteration through the detection loop.
 
 The precise behaviour depends on the PropagationType. NonLooped is for a final
 chunk of the sequence which comes after all the looped elements. It can have
@@ -103,13 +111,13 @@ multiple starting steps, but does not need any incrementors. Looped is for all
 other chunks and can have both multiple starting steps and incrementors.
 """
 struct PropagationChunk{L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
-    initial_elements::Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}
-    incrementor_elements::Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}
+    initial_elements::Vector{SeqElement{T,N}}
+    incrementor_elements::Array{SeqElement{T,N},2}
     current::Vector{Propagator{T,A}}
     incrementors::Array{Propagator{T,A},2}
 
-    function PropagationChunk{L,A}(initial_elements::Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}},
-        incrementor_elements::Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}) where {L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
+    function PropagationChunk{L,A}(initial_elements::Vector{SeqElement{T,N}},
+        incrementor_elements::Array{SeqElement{T,N},2}) where {L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
 
         current = Vector{Propagator{T,A}}(undef, length(initial_elements))
         incrementors = Array{Propagator{T,A},2}(undef, size(incrementor_elements))
@@ -117,8 +125,8 @@ struct PropagationChunk{L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
     end
 
     PropagationChunk{L,A,T,N}() where {L,A,T,N} = new{L,A,T,N}(
-        Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}(),
-        Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}(undef,(0,0)),
+        Vector{SeqElement{T,N}}(),
+        Array{SeqElement{T,N},2}(undef,(0,0)),
         Vector{Propagator{T,A}}(),
         Array{Propagator{T,A},2}(undef,(0,0)))
 end
@@ -225,8 +233,8 @@ function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop
     loop_steps = Int(duration(loop_element)/step_size)
     incrementor_cycle = div(lcm(loop_steps*old_loop_cycle, period_steps), loop_steps)
 
-    initial_elements = Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}(undef, old_loop_cycle)
-    incrementor_elements = Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}(undef, old_loop_cycle, incrementor_cycle)
+    initial_elements = Vector{SeqElement{T,N}}(undef, old_loop_cycle)
+    incrementor_elements = Array{SeqElement{T,N},2}(undef, old_loop_cycle, incrementor_cycle)
     nonloop_steps = 0
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
@@ -260,7 +268,7 @@ function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonl
 
     old_loop_cycle = (old_loop_steps == 0) ? 1 : div(lcm(old_loop_steps, period_steps), old_loop_steps)
     nonloop_steps = 0
-    initial_elements = Vector{Tuple{Union{Pulse{T,N},Block{T,N}},Int}}(undef, old_loop_cycle)
+    initial_elements = Vector{SeqElement{T,N}}(undef, old_loop_cycle)
 
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
@@ -268,7 +276,7 @@ function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonl
         initial[n] = (loop_element, start)
     end
 
-    incrementor_elements = Array{Tuple{Union{Pulse{T,N},Block{T,N}},Int},2}()
+    incrementor_elements = Array{SeqElement{T,N},2}()
     chunk = PropagationChunk{NonLooped,A}(initial_elements, incrementor_elements)
     return chunk, old_loop_steps, old_nonloop_steps+nonloop_steps
 end
