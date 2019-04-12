@@ -1,4 +1,4 @@
-import SpecialFunctions.besselj0,SpecialFunctions.besselj1,SpecialFunctions.besselj
+import SpecialFunctions: besselj0, besselj1, besselj
 
 """
     expm_cheby(H, dt, temps)
