@@ -372,6 +372,6 @@ end
 end
 
 @testset "cuda_examples" begin
-    @test rfdr(GPUBatchedMode)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
-    @test rfdr(GPUSingleMode)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
+    @test rfdr(GPUBatchedMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
+    @test rfdr(GPUSingleMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
 end
