@@ -21,7 +21,6 @@ function rfdr(M=CPUSingleMode, ::Type{T} = Float64) where T
     crystallites, weights = get_crystallites("test/rep100.cry", T)
     spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
 
-    GC.gc()
     return spec
 end
 
@@ -127,6 +126,5 @@ function rfdr_long(M=CPUSingleMode)
     crystallites, weights = get_crystallites("test/rep100.cry")
     spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
 
-    GC.gc()
     return spec
 end

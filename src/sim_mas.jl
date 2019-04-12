@@ -429,10 +429,6 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     combine_propagators!(pulse_cache, parameters)
     build_pulse_props!(pulse_cache, parameters)
 
-    if M <: GPUBatchedMode
-        GC.gc()
-    end
-
     Uloop = similar(temp)
     for n = 1:nγ
         if n != 1
