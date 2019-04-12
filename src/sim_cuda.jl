@@ -128,7 +128,7 @@ end
 function eig_max_bound(A::CuArray{T}) where {T}
     x = size(A, 1)
     z = size(A, 3)
-    results = CuArray{T}(z)
+    results = CuArray{T}(undef, z)
     @cuda blocks=z threads=x shmem=sizeof(T)*z kernel_eig_max_bound(A, results)
     return maximum(Array(results))
 end
@@ -181,7 +181,7 @@ end
 function threshold(A::CuArray{T}, thresh::T) where {T}
     x = size(A, 1)
     z = size(A, 3)
-    results = CuArray{Bool}(z)
+    results = CuArray{Bool}(undef, z)
     @cuda blocks=z threads=x shmem=sizeof(Bool) kernel_threshold(A, thresh, results)
     return all(Array(results))
 end
