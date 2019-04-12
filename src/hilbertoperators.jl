@@ -60,7 +60,7 @@ function mul!(C::H, A::SparseMatrixCSC{T,Ti}, B::H, transA::Char, transB::Char, 
     {Ti,T<:BLAS.BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
 
     transB == 'N' || throw(ArgumentError("'T' and 'C' operations for B are not implemented"))
-    cscmm!(transA, T(alpha), A, dropdims(B.data,3), T(beta), dropdims(C.data,3))
+    cscmm!(transA, T(alpha), A, dropdims(B.data, dims=3), T(beta), dropdims(C.data, dims=3))
     C
 end
 
