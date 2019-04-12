@@ -155,17 +155,32 @@ struct Sequence{T<:AbstractFloat,N}
         return new{T,N}(pulses, repeats, detection_loop)
     end
 
-    function Sequence{T}(sequence::Sequence{T1,N}) where {T<:AbstractFloat,T1,N}
-        pulses = Vector{Union{Pulse{T,N},Block{T,N}}}()
-        for n in sequence.pulses
-            if isa(n,Pulse)
-                push!(pulses, Pulse{T}(n))
-            elseif isa(n, Block)
-                push!(pulses, Block{T}(n))
-            end
+    function Sequence{T}(pulses, repeats, detection_loop) where T<:AbstractFloat
+        _, N = partype(pulses[1])
+        if typeof(pulses) != Vector{Union{Pulse{T,N},Block{T,N}}}
+            pulses = convert_pulses(pulses, T, N)
         end
+        return new{T,N}(pulses, repeats, detection_loop)
+    end
+
+    function Sequence{T}(sequence::Sequence{T1,N}) where {T<:AbstractFloat,T1,N}
+        pulses = convert_pulses(sequence.pulses, T, N)
         return new{T,N}(pulses, sequence.repeats, sequence.detection_loop)
     end
+end
+
+function convert_pulses(pulses, ::Type{T}, N) where {T}
+    out = Vector{Union{Pulse{T,N},Block{T,N}}}()
+    for n in pulses
+        if isa(n,Pulse)
+            push!(out, Pulse{T}(n))
+        elseif isa(n, Block)
+            push!(out, Block{T}(n))
+        else
+            throw(ArgumentError("Sequences may only contain Blocks and Pulses"))
+        end
+    end
+    out
 end
 
 include("hilbertoperators.jl")
@@ -194,9 +209,9 @@ struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray
         γ_steps = Int(period_steps/nγ)
         angles = magic_angle(T)
 
-        x = X(Array{Complex{Float64}})
-        y = Y(Array{Complex{Float64}})
-        z = Z(Array{Complex{Float64}})
+        x = X(Array{Complex{T}})
+        y = Y(Array{Complex{T}})
+        z = Z(Array{Complex{T}})
         channels = check_spins(spins)
         xyz=channel_XYZ(spins, channels, x, y, z)
 

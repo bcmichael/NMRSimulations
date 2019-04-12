@@ -87,7 +87,7 @@ function ubi(a,T::Type = Float64)
     rfdr = Block([Pulse(48, 0, 0),
         Pulse(4, 125, 0),
         Pulse(48, 0, 0)])
-    sequence = Sequence{T}(Sequence([rfdr], 1000, [1]))
+    sequence = Sequence{T}([rfdr], 1000, [1])
 
     x = X(Array{Complex{T}})
     y = Y(Array{Complex{T}})
