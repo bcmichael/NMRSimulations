@@ -1,5 +1,5 @@
-function rfdr(M=CPUSingleMode)
-    spins = [Spin(1, 0, 0, 0, 0, 0, 0), Spin(1, 1000, 0, 0, 0, 0, 0)]
+function rfdr(M=CPUSingleMode, ::Type{T} = Float64) where T
+    spins = [Spin{T}(1, 0, 0, 0, 0, 0, 0), Spin{T}(1, 1000, 0, 0, 0, 0, 0)]
     cs = initial_cs(spins)
     dip = dipole_coupling(spins,1,2,1000)
     H = cs+dip
@@ -8,17 +8,17 @@ function rfdr(M=CPUSingleMode)
         Pulse(4,125,0),
         Pulse(48,0,0)])
 
-    sequence = Sequence([rfdr, rfdr], 500, [1, 2])
+    sequence = Sequence{T}([rfdr, rfdr], 500, [1, 2])
 
-    parameters = SimulationParameters{M}(100, 1, 10, spins)
+    parameters = SimulationParameters{M,T}(100, 1, 10, spins)
 
-    x = X(Array{Complex{Float64}})
-    y = Y(Array{Complex{Float64}})
-    z = Z(Array{Complex{Float64}})
+    x = X(Array{Complex{T}})
+    y = Y(Array{Complex{T}})
+    z = Z(Array{Complex{T}})
     p = sparse(kron_up(x, 1, 2))
     detect = sparse(kron_up(x+im*y, 2, 2))
 
-    crystallites, weights = get_crystallites("test/rep100.cry")
+    crystallites, weights = get_crystallites("test/rep100.cry", T)
     spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
 
     GC.gc()
