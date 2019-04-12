@@ -224,7 +224,7 @@ function Base.unsafe_convert(::Type{PtrOrCuPtr{T}}, val) where {T}
 end
 
 gemm_batch!(transA::Char, transB::Char, alpha::T, A::CuArray{T,3}, B::CuArray{T,3}, beta::T,
-    C::CuArray{T,3}) where {T<:BLAS.BlasFloat} = CuArrays.CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
+    C::CuArray{T,3}) where {T<:BlasFloat} = CuArrays.CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
 
 # This isn't an actual BLAS operation, because the arrays are different types, but we use this in expm_cheby
 # The fallback uses getindex, which is horribly slow for CuArrays so define a replacement with a CUDA kernel

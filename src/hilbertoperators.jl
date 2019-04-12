@@ -1,4 +1,4 @@
-import LinearAlgebra.axpy!,LinearAlgebra.BLAS.gemm!
+import LinearAlgebra: axpy!, BLAS.gemm!, BLAS.BlasFloat
 
 abstract type HilbertOperator{T<:AbstractFloat,A<:AbstractArray} end
 
@@ -39,14 +39,14 @@ Hamiltonian(x::Vector{<:SphericalTensor{A}}) where {A<:AbstractArray} = Hamilton
 operator_iter(A::HilbertOperator) = size(A.data, 1), size(A.data, 3)
 
 function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {T<:BLAS.BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
+    {T<:BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
 
     gemm_batch!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
 end
 
 function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {T<:BLAS.BlasFloat,Ar<:AbstractArray{T,2},T1,H<:HilbertOperator{T1,Ar}}
+    {T<:BlasFloat,Ar<:AbstractArray{T,2},T1,H<:HilbertOperator{T1,Ar}}
 
     gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
@@ -57,7 +57,7 @@ mul!(C::H, A::H, B::H, transA::Char, transB::Char) where {H<:HilbertOperator} = 
 mul!(C::H, A::H, B::H, alpha::Number, beta::Number) where {H<:HilbertOperator} = mul!(C, A, B, 'N', 'N', alpha, beta)
 
 function mul!(C::H, A::SparseMatrixCSC{T,Ti}, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {Ti,T<:BLAS.BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
+    {Ti,T<:BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
 
     transB == 'N' || throw(ArgumentError("'T' and 'C' operations for B are not implemented"))
     cscmm!(transA, T(alpha), A, dropdims(B.data, dims=3), T(beta), dropdims(C.data, dims=3))
