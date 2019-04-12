@@ -1,5 +1,6 @@
 using CUDAnative
 using CuArrays
+using CUDAdrv
 
 CuArrays.allowscalar(false)
 
@@ -210,61 +211,20 @@ function kernel_threshold(A::CuDeviceArray{T}, thresh::T, results) where {T}
     return nothing
 end
 
-const CUBLAS = CuArrays.CUBLAS
-# These aren't in CuArrays even though the half precision version is as of v0.8.1
-@eval CUBLAS begin
-    function cublasSgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
-        @check ccall((:cublasSgemmStridedBatched, libcublas),
-                     cublasStatus_t,
-                     (cublasHandle_t, cublasOperation_t, cublasOperation_t, Cint, Cint, Cint, Ptr{Cfloat}, Ptr{Cfloat}, Cint, Clonglong, Ptr{Cfloat}, Cint, Clonglong, Ptr{Cfloat}, Ptr{Cfloat}, Cint, Clonglong, Cint),
-                     handle, transa, transb, m, n, k, [alpha], A, lda, strideA, B, ldb, strideB, [beta], C, ldc, strideC, batchCount)
+# Fix performance issue in CUDAdrv 2.0.0
+function Base.unsafe_convert(::Type{PtrOrCuPtr{T}}, val) where {T}
+    ptr = if applicable(Base.unsafe_convert, Ptr{T}, val)
+        Base.unsafe_convert(Ptr{T}, val)
+    elseif applicable(Base.unsafe_convert, CuPtr{T}, val)
+        Base.unsafe_convert(CuPtr{T}, val)
+    else
+        throw(ArgumentError("cannot convert to either a CPU or GPU pointer"))
     end
-    function cublasDgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
-        @check ccall((:cublasDgemmStridedBatched, libcublas),
-                     cublasStatus_t,
-                     (cublasHandle_t, cublasOperation_t, cublasOperation_t, Cint, Cint, Cint, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Clonglong, Ptr{Cdouble}, Cint, Clonglong, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Clonglong, Cint),
-                     handle, transa, transb, m, n, k, [alpha], A, lda, strideA, B, ldb, strideB, [beta], C, ldc, strideC, batchCount)
-    end
-    function cublasCgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
-        @check ccall((:cublasCgemmStridedBatched, libcublas),
-                     cublasStatus_t,
-                     (cublasHandle_t, cublasOperation_t, cublasOperation_t, Cint, Cint, Cint, Ptr{cuComplex}, Ptr{cuComplex}, Cint, Clonglong, Ptr{cuComplex}, Cint, Clonglong, Ptr{cuComplex}, Ptr{cuComplex}, Cint, Clonglong, Cint),
-                     handle, transa, transb, m, n, k, [alpha], A, lda, strideA, B, ldb, strideB, [beta], C, ldc, strideC, batchCount)
-    end
-    function cublasZgemmStridedBatched(handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
-        @check ccall((:cublasZgemmStridedBatched, libcublas),
-                     cublasStatus_t,
-                     (cublasHandle_t, cublasOperation_t, cublasOperation_t, Cint, Cint, Cint, Ptr{cuDoubleComplex}, Ptr{cuDoubleComplex}, Cint, Clonglong, Ptr{cuDoubleComplex}, Cint, Clonglong, Ptr{cuDoubleComplex}, Ptr{cuDoubleComplex}, Cint, Clonglong, Cint),
-                     handle, transa, transb, m, n, k, [alpha], A, lda, strideA, B, ldb, strideB, [beta], C, ldc, strideC, batchCount)
-    end
+    return Base.bitcast(PtrOrCuPtr{T}, ptr)
 end
 
-for (gemm_batch, elty) in
-    ((CUBLAS.cublasDgemmStridedBatched, :Float64),
-     (CUBLAS.cublasSgemmStridedBatched, :Float32),
-     (CUBLAS.cublasZgemmStridedBatched, :ComplexF64),
-     (CUBLAS.cublasCgemmStridedBatched, :ComplexF32))
-    @eval begin
-        function square_strided_batch_gemm!(transA::Char, transB::Char, alpha::$elty, A::CuArray{$elty},
-            B::CuArray{$elty}, beta::$elty, C::CuArray{$elty})
-
-            x, y, z = size(A)
-            batch_count = z
-            if size(B) != (x,y,z) || size(C) != (x, y, z)
-                throw(DimensionMismatch("A has size $(size(A)), B has size $(size(B)), and C has size $(size(C))"))
-            end
-            lda = max(1, stride(A, 2))
-            ldb = max(1, stride(B, 2))
-            ldc = max(1, stride(C, 2))
-            strideABC = x*x
-            opA = CUBLAS.cublasop(transA)
-            opB = CUBLAS.cublasop(transB)
-            CUBLAS.@check $gemm_batch(CUBLAS.libcublas_handle[], opA, opB, x, x, x, alpha, A,lda, strideABC, B, ldb,
-                strideABC, beta, C, ldc, strideABC, batch_count)
-            C
-        end
-    end
-end
+gemm_batch!(transA::Char, transB::Char, alpha::T, A::CuArray{T,3}, B::CuArray{T,3}, beta::T,
+    C::CuArray{T,3}) where {T<:BLAS.BlasFloat} = CuArrays.CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
 
 # This isn't an actual BLAS operation, because the arrays are different types, but we use this in expm_cheby
 # The fallback uses getindex, which is horribly slow for CuArrays so define a replacement with a CUDA kernel

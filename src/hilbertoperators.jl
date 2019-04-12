@@ -41,7 +41,7 @@ operator_iter(A::HilbertOperator) = size(A.data, 1), size(A.data, 3)
 function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
     {T<:BLAS.BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
 
-    square_strided_batch_gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
+    gemm_batch!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
 end
 
