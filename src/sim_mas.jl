@@ -7,13 +7,12 @@ Generate a propagator from a Hamiltonian ('H') and a time interval ('dt') using
 a Chebyshev expansion. Expects 'temps' to be an indexable collection of dense
 Arrays of the same size and element type as 'H'.
 """
-function expm_cheby(H::Hamiltonian{T,A}, dt, temps) where {T,A}
+function expm_cheby!(out, H::Hamiltonian{T,A}, dt, temps) where {T,A}
     nmax = 25
     thresh = T(1E-10)
     bound = eig_max_bound(H.data)
     x = scaledn!(H,bound)
     y = T(-2*dt*pi*bound)
-    out = similar(temps[1], Propagator)
     fill_diag!(out, besselj0(y))
     axpy!(2*im*besselj1(y), x, out)
 
@@ -140,20 +139,17 @@ function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     return occupied
 end
 
-function combine_propagators!(pulse_cache, parameters)
+function combine_propagators!(rf, step_propagators, parameters)
     γ_steps = parameters.γ_steps
 
-    for rf in values(pulse_cache)
-        a = Set{Tuple{Int,Int}}()
-        for timing in keys(rf.timings)
-            push!(a, (mod1(timing[1], γ_steps), mod(timing[2], γ_steps)))
-        end
-        for combination in a
-            rf.combinations[combination] =
-                combine_propagators(rf.step_propagators, combination, parameters)
-        end
+    a = Set{Tuple{Int,Int}}()
+    for timing in keys(rf.timings)
+        push!(a, (mod1(timing[1], γ_steps), mod(timing[2], γ_steps)))
     end
-    return pulse_cache
+    for combination in a
+        rf.combinations[combination] = combine_propagators(step_propagators, combination, parameters)
+    end
+    return rf
 end
 
 function combine_propagators(propagators::A, combination, parameters) where {A}
@@ -313,7 +309,7 @@ function γiterate_propagator!(U, rf, timing, parameters, γ_iteration)
     return U
 end
 
-function build_step_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
+function build_combined_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
     period_steps = parameters.period_steps
     angles = parameters.angles
 
@@ -324,24 +320,23 @@ function build_step_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamilto
         push!(Hrotated, H)
     end
     temps = [Hamiltonian(similar(Hrotated[1].data, T)) for j = 1:2]
-    for rf_pair in pulse_cache
-        step_propagators!(rf_pair, Hrotated, parameters, temps)
+    step_propagators = [similar(temps[1], Propagator) for j in 1:period_steps]
+    for (γB1, rf_cache) in pulse_cache
+        step_propagators!(step_propagators, γB1, Hrotated, parameters, temps)
+        combine_propagators!(rf_cache, step_propagators, parameters)
     end
     return pulse_cache
 end
 
-function step_propagators!(rf_pair, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
+function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyz = parameters.xyz
-    rf = rf_pair[1]
-    propagators = rf_pair[2].step_propagators
 
     Hrf = array_wrapper_type(A)(pulse_H(rf,xyz))
     for n = 1:period_steps
         H = real_add(Hrotated[n], Hrf)
-        U = expm_cheby(H, step_size/10^6, temps)
-        push!(propagators, U)
+        U = expm_cheby!(propagators[n], H, step_size/10^6, temps)
     end
     return propagators
 end
@@ -425,8 +420,7 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     prop_generator = build_generator(sequence, parameters, A)
     pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
     find_pulses!(pulse_cache, prop_generator, parameters)
-    build_step_propagators!(pulse_cache, Hinternal, parameters)
-    combine_propagators!(pulse_cache, parameters)
+    build_combined_propagators!(pulse_cache, Hinternal, parameters)
     build_pulse_props!(pulse_cache, parameters)
 
     Uloop = similar(temp)

@@ -267,8 +267,7 @@ end
     PropagatorCollectionRF
 
 A 'PropagatorCollectionRF' contains a cache of propagators that all share the
-same RF powers. 'step_propagators' holds a propagator for every step of the
-rotor period. The keys of 'timings' are a starting step within a rotor period
+same RF powers. The keys of 'timings' are a starting step within a rotor period
 and a number of steps, thus referring to a unique time period for a pulse. The
 keys of 'combinations' are similar to the keys of 'timings' but modulo γ_steps.
 The combined propagators for a particular key in 'combinations' are used to
@@ -276,12 +275,11 @@ construct the propagators for all time periods which satisfy this
 relationship.
 """
 struct PropagatorCollectionRF{T<:AbstractFloat,N,A<:AbstractArray}
-    step_propagators::Vector{Propagator{T,A}}
     combinations::Dict{NTuple{2,Int}, Vector{Propagator{T,A}}}
     timings::Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}
 
-    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Vector{Propagator{T,A}}(),
-        Dict{NTuple{2,Int}, Vector{Propagator{T,A}}}(), Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}())
+    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Dict{NTuple{2,Int}, Vector{Propagator{T,A}}}(),
+        Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}())
 end
 
 function add_timing!(collection::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int}) where {T,N,A}
