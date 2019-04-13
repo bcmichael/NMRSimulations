@@ -78,24 +78,21 @@ convert(::Type{Pulse{T,N}}, pulse::Pulse{T1,N}) where {T,T1,N} = Pulse{T,N}(puls
 struct Block{T<:AbstractFloat,N}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}
     repeats::Int
+    collapsed::Vector{Pulse{T,N}}
+    # collapsed is the same for all equivalent Blocks
 
-    Block{T,N}(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats=1) where {T<:AbstractFloat,N} =
-        new{T,N}(pulses, repeats)
+    function Block{T,N}(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats=1) where {T<:AbstractFloat,N}
+        collapsed = collapse_block(pulses, repeats)
+        return new{T,N}(pulses, repeats, collapsed)
+    end
 
     function Block(pulses, repeats=1)
         T, N = partype(pulses[1])
-        return new{T,N}(pulses, repeats)
+        return Block{T,N}(Vector{Union{Pulse{T,N},Block{T,N}}}(pulses), repeats)
     end
 
     function Block{T}(block::Block{T1,N}) where {T<:AbstractFloat,T1,N}
-        pulses = Vector{Union{Pulse{T,N},Block{T,N}}}()
-        for n in block.pulses
-            if isa(n, Pulse)
-                push!(pulses, Pulse{T}(n))
-            elseif isa(n,Block)
-                push!(pulses, Block{T}(n))
-            end
-        end
+        pulses = convert_pulses(block.pulses, T, N)
         return Block{T,N}(pulses, block.repeats)
     end
 end
@@ -113,34 +110,33 @@ function duration(block::Block{T}) where {T}
     return total
 end
 
-# Tuple{Block,Int} is the type used for dict keys to cache Block propagators
-# The propagator only depends on the contents of the Block and the start step
+# The propagator for a Block only depends on the contents and the start step
 # hash/compare must be based on the contents instead of the object id
-hash(x::Tuple{Block,Int}) = hash((collapse_element(x[1]), x[2]))
-isequal(a::Tuple{Block,Int}, b::Tuple{Block,Int}) =
-    isequal((collapse_element(a[1]), a[2]), (collapse_element(b[1]), b[2]))
+hash(block::Block) = hash(block.collapsed)
+isequal(a::Block, b::Block) = isequal(a.collapsed, b.collapsed)
 
-function collapse_element(block::Block{T,N}) where {T,N}
-    pulses = Vector{Pulse{T,N}}()
-    for n in block.pulses
-        collapsed = collapse_element(n)
-        append!(pulses, collapsed)
+function collapse_block(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats) where {T,N}
+    as_pulses = Vector{Pulse{T,N}}()
+    for n in pulses
+        if n isa Pulse
+            push!(as_pulses, n)
+        elseif n isa Block
+            append!(as_pulses, n.collapsed)
+        end
     end
-    pulses = repeat(pulses, block.repeats)
+    as_pulses = repeat(as_pulses, repeats)
     out = Vector{Pulse{T,N}}()
-    push!(out, pulses[1])
-    for n = 2:length(pulses)
-        if out[end].γB1 == pulses[n].γB1 && out[end].phase == pulses[n].phase
+    push!(out, as_pulses[1])
+    for n = 2:length(as_pulses)
+        if out[end].γB1 == as_pulses[n].γB1 && out[end].phase == as_pulses[n].phase
             pulse = pop!(out)
-            push!(out, Pulse{T,N}(pulse.t+pulses[n].t, pulse.γB1, pulse.phase))
+            push!(out, Pulse{T,N}(pulse.t+as_pulses[n].t, pulse.γB1, pulse.phase))
         else
-            push!(out, pulses[n])
+            push!(out, as_pulses[n])
         end
     end
     return out
 end
-
-collapse_element(pulse::Pulse) = [pulse]
 
 struct Sequence{T<:AbstractFloat,N}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}

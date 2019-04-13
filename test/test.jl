@@ -82,6 +82,12 @@ include("examples.jl")
             @test partype(b)==(Float64,n)
             @test duration(b)==a.t*2
             @test Block{Float32}(b) isa Block{Float32,n}
+            c=Block([a,a])
+            d = Block([a,a],2)
+            @test hash(b) == hash(c)
+            @test hash(b) != hash(d)
+            @test isequal(b, c)
+            @test ! isequal(b, d)
         end
     end
 
