@@ -1,4 +1,5 @@
 using Distributed
+using DistributedArrays
 using SparseArrays
 using LinearAlgebra
 using DelimitedFiles
