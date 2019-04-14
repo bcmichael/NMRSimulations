@@ -1,20 +1,20 @@
 import SpecialFunctions: besselj0, besselj1, besselj
 
 """
-    expm_cheby(H, dt, temps)
+    expm_cheby!(U, H, dt, temps)
 
-Generate a propagator from a Hamiltonian ('H') and a time interval ('dt') using
-a Chebyshev expansion. Expects 'temps' to be an indexable collection of dense
-Arrays of the same size and element type as 'H'.
+Modify 'U' to hold a propagator generated from a Hamiltonian ('H') and a time
+interval ('dt') using a Chebyshev expansion. Expects 'temps' to be an indexable
+collection of two arrays similar to the contents of 'H'.
 """
-function expm_cheby!(out, H::Hamiltonian{T,A}, dt, temps) where {T,A}
+function expm_cheby!(U, H::Hamiltonian{T,A}, dt, temps) where {T,A}
     nmax = 25
     thresh = T(1E-10)
     bound = eig_max_bound(H.data)
     x = scaledn!(H,bound)
     y = T(-2*dt*pi*bound)
-    fill_diag!(out, besselj0(y))
-    axpy!(2*im*besselj1(y), x, out)
+    fill_diag!(U, besselj0(y))
+    axpy!(2*im*besselj1(y), x, U)
 
     t1, t2 = temps
     fill_diag!(t1, 1)
@@ -23,13 +23,13 @@ function expm_cheby!(out, H::Hamiltonian{T,A}, dt, temps) where {T,A}
     for n = 3:nmax
         mul!(t1, x, t2, 2, -1)
         j = 2*im^(n-1)*besselj(Cint(n-1), y) # Cast to Cint for type stability when using Float32 as of v1.0.0
-        axpy!(j, t1, out)
+        axpy!(j, t1, U)
         if threshold(t1.data, T(thresh/abs(j)))
             break
         end
         t1, t2 = t2, t1
     end
-    return out
+    return U
 end
 
 """
