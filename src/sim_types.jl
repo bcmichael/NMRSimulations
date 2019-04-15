@@ -1,4 +1,4 @@
-import Base: +, *, convert, keys, haskey, copy, copyto!, similar, hash, isequal
+import Base: +, *, convert, haskey, copy, copyto!, similar, hash, isequal, getindex, setindex!
 
 struct SphericalTensor{T}
     s00::T
@@ -75,15 +75,34 @@ end
 
 convert(::Type{Pulse{T,N}}, pulse::Pulse{T1,N}) where {T,T1,N} = Pulse{T,N}(pulse.t, pulse.γB1, pulse.phase)
 
+"""
+    Block
+
+A Block represents a series of pulses that are executes sequentially in a pulse
+sequence. A Block holds a vector of Pulses and Blocks ('pulses') to include in a
+pulse sequence and a number of 'repeats' of this seqeunce to execute. The Block
+will also hold a 'collapsed' form of the 'pulses'. This form is the same for all
+equivalent Blocks no matter how they are specified.
+
+A Block also has a rank to determine the order in which propagators for Blocks
+are constructed. A Block that contains only Pulses and has 1 repeat is rank 1.
+Otherwise a Block has a rank 1 higher than the highest rank Block in its
+'pulses' if it has 1 repeat or 2 higher if it has mulitple repeats. Low rank
+Blocks are constructed first ensuring that all of the Blocks needed to construct
+higher rank Blocks will have already been constructed before they are needed.
+"""
 struct Block{T<:AbstractFloat,N}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}
     repeats::Int
     collapsed::Vector{Pulse{T,N}}
-    # collapsed is the same for all equivalent Blocks
+    rank::Int
 
     function Block{T,N}(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats=1) where {T<:AbstractFloat,N}
-        collapsed = collapse_block(pulses, repeats)
-        return new{T,N}(pulses, repeats, collapsed)
+        collapsed, rank = collapse_block(pulses, repeats)
+        if repeats > 1
+            rank += 1
+        end
+        return new{T,N}(pulses, repeats, collapsed, rank+1)
     end
 
     function Block(pulses, repeats=1)
@@ -117,11 +136,13 @@ isequal(a::Block, b::Block) = isequal(a.collapsed, b.collapsed)
 
 function collapse_block(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats) where {T,N}
     as_pulses = Vector{Pulse{T,N}}()
+    rank = 0
     for n in pulses
         if n isa Pulse
             push!(as_pulses, n)
         elseif n isa Block
             append!(as_pulses, n.collapsed)
+            rank = max(rank, n.rank)
         end
     end
     as_pulses = repeat(as_pulses, repeats)
@@ -135,7 +156,7 @@ function collapse_block(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats) w
             push!(out, as_pulses[n])
         end
     end
-    return out
+    return out, rank
 end
 
 struct Sequence{T<:AbstractFloat,N}
@@ -284,4 +305,71 @@ end
 
 function add_rf!(pulse_cache::Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}, rf) where {T,N,A}
     pulse_cache[rf] = PropagatorCollectionRF{T,N,A}()
+end
+
+"""
+    PropagatorCollectionBlock
+
+A 'PropagatorCollectionBlock' contains a cache of propagators for Blocks that
+all share the same rank. 'steps' is a Dict storing the number of steps for each
+key, while 'propagators' is a Dict storing the propagator for each key. The keys
+are Blocks and the step they start on. This combination fully specifies which
+propagator to construct.
+"""
+struct PropagatorCollectionBlock{T<:AbstractFloat,N,A<:AbstractArray}
+    steps::Dict{Tuple{Block{T,N}, Int}, Int}
+    propagators::Dict{Tuple{Block{T,N}, Int}, Propagator{T,A}}
+
+    PropagatorCollectionBlock{T,N,A}() where {T,N,A} = new{T,N,A}(Dict{Tuple{Block{T,N}, Int}, Int}(),
+                                                                  Dict{Tuple{Block{T,N}, Int}, Propagator{T,A}}())
+end
+
+"""
+    BlockCache
+
+A BlockCache stores a vector of PropagatorCollectionBlocks each of which caches
+the propagators for Blocks of a given rank. Organization by rank allows for
+constructing propagators for lower rank Blocks first.
+"""
+struct BlockCache{T,N,A}
+    ranks::Vector{PropagatorCollectionBlock{T,N,A}}
+
+    BlockCache{T,N,A}() where {T,N,A} = new{T,N,A}(Vector{PropagatorCollectionBlock{T,N,A}}())
+end
+
+function add_block!(block_cache::BlockCache{T,N,A}, key::Tuple{Block{T,N}, Int}, steps) where {T,N,A}
+    rank = key[1].rank
+    while rank > length(block_cache.ranks)
+        push!(block_cache.ranks, PropagatorCollectionBlock{T,N,A}())
+    end
+    block_cache.ranks[rank].steps[key] = steps
+end
+
+function steps(block_cache::BlockCache{T,N}, key::Tuple{Block{T,N}, Int}) where {T,N}
+    rank = key[1].rank
+    rank <= length(block_cache.ranks) || throw(KeyError("key $key not found"))
+    return block_cache.ranks[rank].steps[key]
+end
+
+function haskey(block_cache::BlockCache{T,N}, key::Tuple{Block{T,N}, Int}) where {T,N}
+    rank = key[1].rank
+    if rank > length(block_cache.ranks)
+        return false
+    end
+    return haskey(block_cache.ranks[rank].steps, key)
+end
+
+function getindex(block_cache::BlockCache{T,N}, key::Tuple{Block{T,N}, Int}) where {T,N}
+    rank = key[1].rank
+    rank <= length(block_cache.ranks) || throw(KeyError("key $key not found"))
+    haskey(block_cache.ranks[rank].steps, key) || throw(KeyError("key $key not found"))
+    haskey(block_cache.ranks[rank].propagators, key) || throw(KeyError("key $key not initiallized"))
+    return block_cache.ranks[rank].propagators[key], block_cache.ranks[rank].steps[key]
+end
+
+function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{T,A}, key::Tuple{Block{T,N}, Int}, ) where {T,N,A}
+    rank = key[1].rank
+    rank <= length(block_cache.ranks) || throw(KeyError("key $key not initiallized"))
+    haskey(block_cache.ranks[rank].steps, key) || throw(KeyError("key $key not initiallized"))
+    block_cache.ranks[rank].propagators[key] = prop
 end

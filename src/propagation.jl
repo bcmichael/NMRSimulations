@@ -7,7 +7,6 @@ Fetch the propagator corresponding to a given 'pulse' and 'start' step from
 function fetch_propagator(pulse::Pulse, start, prop_cache, parameters)
     period_steps = parameters.period_steps
     step_size = parameters.step_size
-    xyzs = parameters.xyz
 
     steps = Int(pulse.t/step_size)
     timing = (mod1(start, period_steps), steps)
@@ -19,59 +18,14 @@ end
     fetch_propagator(block, start, prop_cache, parameters)
 
 Fetch the propagator corresponding to a given 'block' and 'start' step from
-'prop_cache'. If the propagator is not in 'prop_cache', generate it and add it
-to the cache. Return the propagator and the number of steps used.
+'prop_cache'. Return the propagator and the number of steps used.
 """
 function fetch_propagator(block::Block, start, prop_cache, parameters)
     period_steps = parameters.period_steps
 
     start_period = mod1(start, period_steps)
-    if !((block, start_period) in keys(prop_cache.blocks))
-        U, steps = build_block_propagator(block, start_period, prop_cache, parameters)
-        prop_cache.blocks[(block, start_period)] = (U, steps)
-    else
-        U, steps = prop_cache.blocks[(block, start_period)]
-    end
+    U, steps = prop_cache.blocks[(block,start_period)]
     return U, steps
-end
-
-"""
-    build_block_propagator(block, start, prop_cache, parameters)
-
-Generate a propagator for the entire 'block' including its repeats using the
-propagators in 'prop_cache'. Return the propagator and the number of steps used.
-"""
-function build_block_propagator(block, start, prop_cache, parameters)
-    step_total = 0
-    if block.repeats > 1
-        # This reorganization ensures that each repeat gets treated as a block for caching purposes
-        block = reorganize_repeated_block(block)
-    end
-
-    Uelement, steps = fetch_propagator(block.pulses[1], start, prop_cache, parameters)
-    U = copy(Uelement)
-    step_total += steps
-    for element in block.pulses[2:end]
-        Uelement, steps = fetch_propagator(element, start+step_total, prop_cache, parameters)
-        mul!(parameters.temps[1], Uelement,U)
-        step_total += steps
-        U, parameters.temps[1] = parameters.temps[1], U
-    end
-    return U, step_total
-end
-
-"""
-    reorganize_repeated_block(block)
-
-Take a 'block' with repeats greater than 1 and reorganize it to have repeats=1.
-The new block will contain several copies of the old block with repeats set to 1
-as its pulses. This creates an equivalent block that is more caching friendly.
-"""
-function reorganize_repeated_block(block)
-    block.repeats > 1 || throw(DomainError)
-    single_repeat = Block(block.pulses, 1)
-    pulses = [single_repeat for n=1:block.repeats]
-    return Block(pulses,1)
 end
 
 abstract type PropagationType end

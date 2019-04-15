@@ -83,9 +83,10 @@ function propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
     return spec, Uloop
 end
 
-function find_pulses!(pulse_cache, pulse::Pulse, start, parameters) where {T,N}
+function find_pulses!(prop_cache, pulse::Pulse, start, parameters) where {T,N}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
+    pulse_cache = prop_cache.pulses
 
     steps = Int(pulse.t/step_size)
     rf = pulse.γB1
@@ -102,33 +103,95 @@ function find_pulses!(pulse_cache, pulse::Pulse, start, parameters) where {T,N}
     return steps
 end
 
-function find_pulses!(pulse_cache, block::Block, start, parameters)
+function find_pulses!(prop_cache, block::Block, start, parameters)
+    period_steps = parameters.period_steps
+    block_cache = prop_cache.blocks
+
+    start_period = mod1(start, period_steps)
+    cache_key = (block, start_period)
+    if haskey(block_cache, cache_key)
+        return steps(block_cache, cache_key)
+    end
+
     step_total = 0
-    for j = 1:block.repeats
-        for n = 1:length(block.pulses)
-            step_total += find_pulses!(pulse_cache, block.pulses[n], start+step_total, parameters)
+    if block.repeats == 1
+        for element in block.pulses
+            step_total += find_pulses!(prop_cache, element, start+step_total, parameters)
+        end
+    else
+        single_repeat = Block(block.pulses, 1)
+        for j = 1:block.repeats
+            step_total += find_pulses!(prop_cache, single_repeat, start+step_total, parameters)
         end
     end
+    add_block!(block_cache, cache_key, step_total)
     return step_total
 end
 
-function find_pulses!(pulse_cache, prop_generator::PropagationGenerator, parameters)
+function find_pulses!(prop_cache, prop_generator::PropagationGenerator, parameters)
     for chunk in prop_generator.loops
-        find_pulses!(pulse_cache, chunk, parameters)
+        find_pulses!(prop_cache, chunk, parameters)
     end
-    find_pulses!(pulse_cache, prop_generator.nonloop, parameters)
-    return pulse_cache
+    find_pulses!(prop_cache, prop_generator.nonloop, parameters)
+    return prop_cache
 end
 
-function find_pulses!(pulse_cache, chunk::PropagationChunk, parameters)
+function find_pulses!(prop_cache, chunk::PropagationChunk, parameters)
     for elements in (chunk.initial_elements, chunk.incrementor_elements)
         for index in eachindex(elements)
             if isassigned(elements, index)
-                find_pulses!(pulse_cache, elements[index][1], elements[index][2], parameters)
+                find_pulses!(prop_cache, elements[index][1], elements[index][2], parameters)
             end
         end
     end
-    return pulse_cache
+    return prop_cache
+end
+
+function build_block_props!(prop_cache, parameters)
+    for collection in prop_cache.blocks.ranks
+        for key in keys(collection.steps)
+            build_block_prop!(prop_cache, key, parameters)
+        end
+    end
+    return prop_cache
+end
+
+function build_block_prop!(prop_cache, key, parameters)
+    U, _ = prop_cache.blocks[key]
+    block, start = key
+    step_total = 0
+    if block.repeats == 1
+        U = build_nonrepeat_block!(U, block, start, prop_cache, parameters)
+    else
+        U = build_repeat_block!(U, block, start, prop_cache, parameters)
+    end
+    prop_cache.blocks[key] = U
+    return prop_cache
+end
+
+function build_nonrepeat_block!(U, block, start, prop_cache, parameters)
+    Uelement, step_total = fetch_propagator(block.pulses[1], start, prop_cache, parameters)
+    copyto!(U, Uelement)
+    for element in block.pulses[2:end]
+        Uelement, steps = fetch_propagator(element, start+step_total, prop_cache, parameters)
+        mul!(parameters.temps[1], Uelement,U)
+        step_total += steps
+        U, parameters.temps[1] = parameters.temps[1], U
+    end
+    return U
+end
+
+function build_repeat_block!(U, block, start, prop_cache, parameters)
+    single_repeat = Block(block.pulses, 1)
+    Uelement, step_total = fetch_propagator(single_repeat, start, prop_cache, parameters)
+    copyto!(U, Uelement)
+    for j = 2:block.repeats
+        Uelement, steps += fetch_propagator(single_repeat, start+step_total, prop_cache, parameters)
+        mul!(parameters.temps[1], Uelement,U)
+        step_total += steps
+        U, parameters.temps[1] = parameters.temps[1], U
+    end
+    return U
 end
 
 function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
@@ -359,6 +422,14 @@ function allocate_propagators!(pulse_cache, parameters)
     end
 end
 
+function allocate_propagators!(block_cache::BlockCache, parameters)
+    for collection in block_cache.ranks
+        for key in keys(collection.steps)
+            collection.propagators[key] = similar(parameters.temps[1])
+        end
+    end
+end
+
 function detect!(spec, Uloop, ρ0::SparseMatrixCSC, detector::SparseMatrixCSC, unique_cols, j, temp)
     x, num = operator_iter(Uloop)
     A_mul_B_rows!(temp, Uloop, ρ0, unique_cols)
@@ -419,37 +490,39 @@ function A_mul_B_rows!(C::HilbertOperator, A::HilbertOperator, B::SparseMatrixCS
     C
 end
 
-function build_pulse_cache(prop_generator::PropagationGenerator{A,T,N}, parameters) where {A,T,N}
+function build_prop_cache(prop_generator::PropagationGenerator{A,T,N}, parameters) where {A,T,N}
     pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
-    find_pulses!(pulse_cache, prop_generator, parameters)
-    allocate_propagators!(pulse_cache, parameters)
-    return pulse_cache
+    block_cache = BlockCache{T,N,A}()
+    prop_cache = (pulses=pulse_cache, blocks=block_cache)
+    find_pulses!(prop_cache, prop_generator, parameters)
+    allocate_propagators!(prop_cache.pulses, parameters)
+    allocate_propagators!(prop_cache.blocks, parameters)
+    return prop_cache
 end
 
 """
-    γ_average!(spec, sequence, Hinternal, ρ0, detector, prop_generator, pulse_cache, parameters)
+    γ_average!(spec, sequence, Hinternal, ρ0, detector, prop_generator, prop_cache, parameters)
 
 Run the simulation of a single crystallite over all γ angles and add the results
 to 'spec'.
 """
 function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{Hamiltonian{T,A}}, ρ0, detector,
-        prop_generator, pulse_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
+        prop_generator, prop_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
 
     steps = parameters.period_steps
     step_size = parameters.step_size
     nγ = parameters.nγ
 
-    build_combined_propagators!(pulse_cache, Hinternal, parameters)
-    build_pulse_props!(pulse_cache, parameters)
+    build_combined_propagators!(prop_cache.pulses, Hinternal, parameters)
+    build_pulse_props!(prop_cache.pulses, parameters)
 
     Uloop = similar(parameters.temps[1])
     for n = 1:nγ
         if n != 1
-            γiterate_pulse_propagators!(pulse_cache, parameters, n)
+            γiterate_pulse_propagators!(prop_cache.pulses, parameters, n)
         end
 
-        block_cache = Dict{Tuple{Block, Int}, Tuple{eltype(parameters.temps),Int}}()
-        prop_cache = (pulses=pulse_cache, blocks=block_cache)
+        build_block_props!(prop_cache, parameters)
         prop_generator = fill_generator!(prop_generator, prop_cache, parameters)
         spec, Uloop = propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
     end
@@ -481,8 +554,8 @@ end
 function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::Sequence{T,N}, dims) where {M,T,A,N}
     push!(parameters.temps, Propagator(A(undef, dims)))
     prop_generator = build_generator(sequence, parameters, A)
-    pulse_cache = build_pulse_cache(prop_generator, parameters)
-    return (parameters, prop_generator, pulse_cache)
+    prop_cache = build_prop_cache(prop_generator, parameters)
+    return (parameters, prop_generator, prop_cache)
 end
 
 """
@@ -501,11 +574,11 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
 
     H = [Hamiltonian(euler_rotation(Hint, crystal_angles)) for crystal_angles in crystallites]
 
-    parameters, prop_generator, pulse_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
+    parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
 
     for n = 1:length(crystallites)
         fill!(spec_crystallite, 0)
-        spec .+= weights[n].*γ_average!(spec_crystallite, sequence, H[n], ρ0, detector, prop_generator, pulse_cache,
+        spec .+= weights[n].*γ_average!(spec_crystallite, sequence, H[n], ρ0, detector, prop_generator, prop_cache,
             parameters)
     end
     return spec./nγ
@@ -521,12 +594,12 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
 
     H = [Hamiltonian(euler_rotation(Hint, crystal_angles), CuArray) for crystal_angles in crystallites]
 
-    parameters, prop_generator, pulse_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
+    parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
 
     for n = 1:length(crystallites)
         fill!(spec_crystallite, 0)
         spec3 = Array(γ_average!(spec_crystallite, sequence, H[n], CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector),
-            prop_generator, pulse_cache, parameters))
+            prop_generator, prop_cache, parameters))
         spec2 = dropdims(sum(spec3, dims=3), dims=3)
         spec .+= weights[n].*spec2
     end
@@ -541,12 +614,12 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
 
     H = Hamiltonian([euler_rotation(Hint, crystal_angles) for crystal_angles in crystallites], CuArray)
 
-    parameters, prop_generator, pulse_cache = prepare_structures(parameters, sequence, size(H.s00.data))
+    parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H.s00.data))
 
     spec_d = CuArray(zeros(Complex{T}, length(crystallites), loops, length(occupied_columns(detector))))
 
     spec3 = Array(γ_average!(spec_d, sequence, H, CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector), prop_generator,
-        pulse_cache, parameters))
+        prop_cache, parameters))
     spec2 = dropdims(sum(spec3, dims=3), dims=3)
     spec2 .*= weights
     spec = sum(spec2, dims=1)
@@ -555,7 +628,8 @@ end
 
 const DStructures{A,T,N} = Tuple{SimulationParameters{CPUMultiProcess,T,A},
                            PropagationGenerator{A,T,N},
-                           Dict{NTuple{N,T},PropagatorCollectionRF{T,N,A}}} where {A,T,N}
+                           NamedTuple{(:pulses,:blocks),Tuple{Dict{NTuple{N,T},PropagatorCollectionRF{T,N,A}},
+                                                              BlockCache{T,N,A}}}} where {A,T,N}
 
 function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, detector,
     crystallites::Vector{EulerAngles{T}}, weights::Vector{T},parameters::SimulationParameters{CPUMultiProcess,T,A}) where {T,A,N}
@@ -569,10 +643,10 @@ function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, det
     structures = ddata(T=DStructures{A,T,N}, init=I->prepare_structures(parameters, sequence, dims))
 
     spec = @distributed (+) for n = 1:length(crystallites)
-        parameters, prop_generator, pulse_cache = structures[:L]
+        parameters, prop_generator, prop_cache = structures[:L]
         spec_crystallite = zeros(Complex{T}, 1, loops)
         H = Hamiltonian(euler_rotation(Hint, crystallites[n]))
-        weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, pulse_cache, parameters)
+        weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, prop_cache, parameters)
     end
     return spec./nγ
 end
