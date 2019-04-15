@@ -389,8 +389,9 @@ function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{T,A}}, 
     xyz = parameters.xyz
 
     Hrf = array_wrapper_type(A)(pulse_H(rf,xyz))
+    H = similar(temps[1])
     for n = 1:period_steps
-        H = real_add(Hrotated[n], Hrf)
+        H = real_add!(H, Hrotated[n], Hrf)
         U = expm_cheby!(propagators[n], H, step_size/10^6, temps)
     end
     return propagators

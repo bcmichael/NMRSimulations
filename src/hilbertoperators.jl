@@ -88,10 +88,9 @@ function fill_diag!(A::HilbertOperator, val)
     return A
 end
 
-function real_add(A::Hamiltonian{T,Ar}, B::AbstractMatrix) where {T,Ar}
-    out = similar(A.data,T)
-    out .= real.(A.data).+real.(B)
-    return Hamiltonian(out)
+function real_add!(C::Hamiltonian, A::Hamiltonian, B::AbstractMatrix)
+    C.data .= real.(A.data).+real.(B)
+    return C
 end
 
 function scaledn!(X::HilbertOperator,s::Number)
