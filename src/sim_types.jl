@@ -373,3 +373,13 @@ function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{T,A}, key::T
     haskey(block_cache.ranks[rank].steps, key) || throw(KeyError("key $key not initiallized"))
     block_cache.ranks[rank].propagators[key] = prop
 end
+
+struct SimCache{T,N,A}
+    step_hamiltonians::Vector{Hamiltonian{T,A}}
+    step_propagators::Vector{Propagator{T,A}}
+    pulses::Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}
+    blocks::BlockCache{T,N,A}
+
+    SimCache{T,N,A}(steps) where {T,N,A} = new{T,N,A}(Vector{Hamiltonian{T,A}}(undef, steps),
+        Vector{Propagator{T,A}}(undef,steps), Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}(), BlockCache{T,N,A}())
+end

@@ -364,23 +364,22 @@ function γiterate_propagator!(U, rf, timing, parameters, γ_iteration)
     return U
 end
 
-function build_combined_propagators!(pulse_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
+function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,N,A}
     period_steps = parameters.period_steps
     angles = parameters.angles
+    step_propagators = prop_cache.step_propagators
 
-    Hrotated = Vector{Hamiltonian{T,A}}()
+    Hrotated = prop_cache.step_hamiltonians
     for n = 1:period_steps
         angles2 = EulerAngles{T}(angles.α+360/period_steps*(n-1), angles.β, angles.γ)
-        H = Hamiltonian(rotate_component2(Hinternal, 0, angles2).data.+Hinternal.s00.data)
-        push!(Hrotated, H)
+        Hrotated[n].data .= rotate_component2(Hinternal, 0, angles2).data.+Hinternal.s00.data
     end
     temps = [Hamiltonian(similar(Hrotated[1].data, T)) for j = 1:2]
-    step_propagators = [similar(temps[1], Propagator) for j in 1:period_steps]
-    for (γB1, rf_cache) in pulse_cache
+    for (γB1, rf_cache) in prop_cache.pulses
         step_propagators!(step_propagators, γB1, Hrotated, parameters, temps)
         combine_propagators!(rf_cache, step_propagators, parameters)
     end
-    return pulse_cache
+    return prop_cache
 end
 
 function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
@@ -491,10 +490,14 @@ function A_mul_B_rows!(C::HilbertOperator, A::HilbertOperator, B::SparseMatrixCS
     C
 end
 
-function build_prop_cache(prop_generator::PropagationGenerator{A,T,N}, parameters) where {A,T,N}
-    pulse_cache = Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}()
-    block_cache = BlockCache{T,N,A}()
-    prop_cache = (pulses=pulse_cache, blocks=block_cache)
+function build_prop_cache(prop_generator::PropagationGenerator{A,T,N}, dims, parameters) where {A,T,N}
+    period_steps = parameters.period_steps
+
+    prop_cache = SimCache{T,N,A}(period_steps)
+    for n = 1:period_steps
+        prop_cache.step_hamiltonians[n] = Hamiltonian(A(undef, dims))
+        prop_cache.step_propagators[n] = Propagator(A(undef, dims))
+    end
     find_pulses!(prop_cache, prop_generator, parameters)
     allocate_propagators!(prop_cache.pulses, parameters)
     allocate_propagators!(prop_cache.blocks, parameters)
@@ -514,7 +517,7 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     step_size = parameters.step_size
     nγ = parameters.nγ
 
-    build_combined_propagators!(prop_cache.pulses, Hinternal, parameters)
+    build_combined_propagators!(prop_cache, Hinternal, parameters)
     build_pulse_props!(prop_cache.pulses, parameters)
 
     Uloop = similar(parameters.temps[1])
@@ -555,7 +558,7 @@ end
 function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::Sequence{T,N}, dims) where {M,T,A,N}
     push!(parameters.temps, Propagator(A(undef, dims)))
     prop_generator = build_generator(sequence, parameters, A)
-    prop_cache = build_prop_cache(prop_generator, parameters)
+    prop_cache = build_prop_cache(prop_generator, dims, parameters)
     return (parameters, prop_generator, prop_cache)
 end
 
@@ -629,8 +632,7 @@ end
 
 const DStructures{A,T,N} = Tuple{SimulationParameters{CPUMultiProcess,T,A},
                            PropagationGenerator{A,T,N},
-                           NamedTuple{(:pulses,:blocks),Tuple{Dict{NTuple{N,T},PropagatorCollectionRF{T,N,A}},
-                                                              BlockCache{T,N,A}}}} where {A,T,N}
+                           SimCache{T,N,A}} where {A,T,N}
 
 function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, detector,
     crystallites::Vector{EulerAngles{T}}, weights::Vector{T},parameters::SimulationParameters{CPUMultiProcess,T,A}) where {T,A,N}

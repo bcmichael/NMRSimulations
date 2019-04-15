@@ -75,7 +75,6 @@ copy(x::A) where {A<:HilbertOperator} = A(copy(x.data))
 copyto!(dest::A,src::A) where {A<:HilbertOperator} = copyto!(dest.data,src.data)
 
 similar(x::A) where {A<:HilbertOperator} = A(similar(x.data))
-similar(x::Hamiltonian{T,A}, ::Type{Propagator}) where {T,A} = Propagator(similar(x.data, Complex{T}))
 
 function fill_diag!(A::HilbertOperator, val)
     fill!(A.data, 0)

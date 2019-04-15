@@ -140,8 +140,6 @@ include("examples.jl")
             @test copy(a).data==a.data
             @test size(similar(a).data)==size(a.data)
             @test typeof(similar(a).data)==typeof(a.data)
-            @test similar(d,Propagator) isa Propagator
-            @test eltype(similar(d,Propagator).data)==Complex{Float64}
             @test operator_iter(a)==(4,1)
         end
     end
@@ -362,7 +360,7 @@ end
     @testset "expm_cheby" begin
         for n=1:2,T in (Float64,Float32)
             temps=[Hamiltonian(rand(T,(2^n,2^n))) for j in 1:2]
-            c = similar(temps[1], Propagator)
+            c = Propagator(rand(Complex{T},(2^n,2^n)))
             for a in (rand(T,(2^n,2^n)),)
                 b=exp(-2*pi*im*a[:,:,1]*1E-6)
                 @test expm_cheby!(c, Hamiltonian(a),1E-6,temps).data≈b atol=1E-4
