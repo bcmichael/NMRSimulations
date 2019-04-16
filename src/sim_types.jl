@@ -105,15 +105,18 @@ struct Block{T<:AbstractFloat,N}
         return new{T,N}(pulses, repeats, collapsed, rank+1)
     end
 
-    function Block(pulses, repeats=1)
-        T, N = partype(pulses[1])
-        return Block{T,N}(Vector{Union{Pulse{T,N},Block{T,N}}}(pulses), repeats)
-    end
-
     function Block{T}(block::Block{T1,N}) where {T<:AbstractFloat,T1,N}
         pulses = convert_pulses(block.pulses, T, N)
         return Block{T,N}(pulses, block.repeats)
     end
+end
+
+function Block(pulses, repeats=1)
+    if length(pulses) == 1 && repeats == 1 && pulses[1] isa Block
+        return pulses[1]
+    end
+    T, N = partype(pulses[1])
+    return Block{T,N}(Vector{Union{Pulse{T,N},Block{T,N}}}(pulses), repeats)
 end
 
 partype(x::Union{Pulse{T,N},Block{T,N}}) where {T,N} = T,N
