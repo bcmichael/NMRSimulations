@@ -186,7 +186,7 @@ function build_repeat_block!(U, block, start, prop_cache, parameters)
     Uelement, step_total = fetch_propagator(single_repeat, start, prop_cache, parameters)
     copyto!(U, Uelement)
     for j = 2:block.repeats
-        Uelement, steps += fetch_propagator(single_repeat, start+step_total, prop_cache, parameters)
+        Uelement, steps = fetch_propagator(single_repeat, start+step_total, prop_cache, parameters)
         mul!(parameters.temps[1], Uelement,U)
         step_total += steps
         U, parameters.temps[1] = parameters.temps[1], U
