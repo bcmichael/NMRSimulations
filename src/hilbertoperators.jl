@@ -135,14 +135,14 @@ function pow!(out::H, x::H, p::Integer, temp::H) where H<:HilbertOperator
         end
         copyto!(out, x)
         while p > 0
-            t = trailing_zeros(p) + 1
+            t = Base.trailing_zeros(p) + 1
             p >>= t
             while (t -= 1) >= 0
                 mul!(temp, x, x)
                 x, temp = temp, x
             end
             mul!(temp, out, x)
-            put, temp = temp, out
+            out, temp = temp, out
         end
     end
     return out, temp
