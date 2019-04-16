@@ -132,6 +132,7 @@ end
 # The propagator for a Block only depends on the contents and the start step
 # hash/compare must be based on the contents instead of the object id
 hash(block::Block) = hash(block.collapsed)
+hash(block::Block, mix::UInt) = hash(block.collapsed, mix)
 isequal(a::Block, b::Block) = isequal(a.collapsed, b.collapsed)
 
 function collapse_block(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats) where {T,N}
