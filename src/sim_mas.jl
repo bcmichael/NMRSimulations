@@ -430,6 +430,14 @@ function allocate_propagators!(block_cache::BlockCache, parameters)
     end
 end
 
+function allocate_propagators!(prop_generator::PropagationGenerator, parameters)
+    for chunk in prop_generator.loops
+        for index in eachindex(chunk.current)
+            chunk.current[index] = similar(parameters.temps[1])
+        end
+    end
+end
+
 function detect!(spec, Uloop, ρ0::SparseMatrixCSC, detector::SparseMatrixCSC, unique_cols, j, temp)
     x, num = operator_iter(Uloop)
     A_mul_B_rows!(temp, Uloop, ρ0, unique_cols)
@@ -558,6 +566,7 @@ end
 function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::Sequence{T,N}, dims) where {M,T,A,N}
     push!(parameters.temps, Propagator(A(undef, dims)))
     prop_generator = build_generator(sequence, parameters, A)
+    allocate_propagators!(prop_generator, parameters)
     prop_cache = build_prop_cache(prop_generator, dims, parameters)
     return (parameters, prop_generator, prop_cache)
 end

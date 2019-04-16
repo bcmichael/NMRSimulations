@@ -242,26 +242,26 @@ Fill in the Propagators in each PropagationChunk in 'prop_generator'.
 """
 function fill_generator!(prop_generator, prop_cache, parameters)
     for chunk in prop_generator.loops
-        fill_chunk!(chunk, prop_cache, parameters)
+        fill_chunk_copy!(chunk.current, chunk.initial_elements, prop_cache, parameters)
+        fill_chunk!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
     end
-    fill_chunk!(prop_generator.nonloop, prop_cache, parameters)
+    fill_chunk!(prop_generator.nonloop.current, prop_generator.nonloop.initial_elements, prop_cache, parameters)
     return prop_generator
 end
 
-"""
-    fill_chunk!(chunk, prop_cache, parameters)
-
-Fill in the current and incrementor fields of 'chunk' with Propagators from
-'prop_cache' corresponding to the pulse sequence elements in the
-initial_elements and incrementor_elements fields.
-"""
-function fill_chunk!(chunk, prop_cache, parameters)
-    fill_array!(chunk.current, chunk.initial_elements, prop_cache, parameters)
-    fill_array!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
-    return chunk
+function fill_chunk_copy!(props, elements, prop_cache, parameters)
+    for index in eachindex(elements)
+        if isassigned(elements, index)
+            U, _ = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters)
+            copyto!(props[index], U)
+        else
+            fill_diag!(props[index], 1)
+        end
+    end
+    return props
 end
 
-function fill_array!(props, elements, prop_cache, parameters)
+function fill_chunk!(props, elements, prop_cache, parameters)
     for index in eachindex(elements)
         if isassigned(elements, index)
             props[index],_ = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters)
