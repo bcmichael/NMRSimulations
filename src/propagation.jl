@@ -169,7 +169,7 @@ function build_before_loop!(sequence, loop, parameters)
     first_index = (loop == 1) ? 1 : sequence.detection_loop[loop-1]+1
     last_index = loop > length(sequence.detection_loop) ? length(sequence.pulses) : sequence.detection_loop[loop]-1
 
-    if last_index > first_index
+    if last_index >= first_index
         element = Block(sequence.pulses[first_index:last_index])
         nonloop_steps = Int(duration(element)/step_size)
         return element, nonloop_steps
