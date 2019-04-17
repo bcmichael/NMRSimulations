@@ -179,61 +179,82 @@ function build_before_loop!(sequence, loop, parameters)
     end
 end
 
-function build_looped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_looped(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+    period_steps = parameters.period_steps
+
+    old_cycle = (loop_steps == 0) ? 1 : div(lcm(loop_steps, period_steps), loop_steps)
+
+    initial, nonloop_steps = build_looped_initials(sequence, loop, loop_steps, nonloop_steps, old_cycle, parameters)
+    incrementors, loop_steps = build_incrementors(sequence, loop, loop_steps, nonloop_steps, old_cycle, parameters)
+
+    chunk = PropagationChunk{Looped,A}(initial, incrementors)
+    return chunk, loop_steps, nonloop_steps
+end
+
+function build_looped_initials(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
+    loop_element = sequence.pulses[sequence.detection_loop[loop]]
+    nonloop_element, steps = build_before_loop!(sequence, loop, parameters)
+    elements = Vector{SeqElement{T,N}}(undef, old_cycle)
+
+    start = nonloop_steps
+    if nonloop_element != nothing
+        elements[1] = (nonloop_element, start)
+    end
+
+    for n = 2:old_cycle
+        start += loop_steps
+        loop_block = Block([loop_element], n-1)
+        if nonloop_element == nothing
+            elements[n] = (loop_block, start)
+        else
+            elements[n] = (Block([nonloop_element, loop_block]), start)
+        end
+    end
+
+    return elements, steps+nonloop_steps
+end
+
+function build_incrementors(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
-    old_loop_cycle = (old_loop_steps == 0) ? 1 : div(lcm(old_loop_steps, period_steps), old_loop_steps)
     loop_element = sequence.pulses[sequence.detection_loop[loop]]
-    loop_steps = Int(duration(loop_element)/step_size)
-    incrementor_cycle = div(lcm(loop_steps*old_loop_cycle, period_steps), loop_steps)
+    steps = Int(duration(loop_element)/step_size)
+    loop_steps += steps
 
-    initial_elements = Vector{SeqElement{T,N}}(undef, old_loop_cycle)
-    incrementor_elements = Array{SeqElement{T,N},2}(undef, old_loop_cycle, incrementor_cycle)
-    nonloop_steps = 0
-    for n = 1:old_loop_cycle
-        start = old_nonloop_steps+(n-1)*old_loop_steps
-        nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
-        if n == 1
-            if nonloop_element != nothing
-                initial_elements[1] = (nonloop_element, start)
-            end
-        else
-            loop_block = Block([loop_element], n-1)
-            if nonloop_element == nothing
-                initial_elements[n] = (loop_block, start)
-            else
-                initial_elements[n] = (Block([nonloop_element, loop_block]), start)
-            end
-        end
+    incrementor_steps = steps*old_cycle
+    incrementor_cycle = div(lcm(incrementor_steps, period_steps), steps)
 
-        incrementor_block = Block([loop_element], old_loop_cycle)
-        steps_before_incrementors = start+(n-1)*loop_steps+nonloop_steps
+    elements = Array{SeqElement{T,N},2}(undef, old_cycle, incrementor_cycle)
+    incrementor_block = Block([loop_element], old_cycle)
+    start = nonloop_steps
+    for n = 1:old_cycle
+        incrementor_start = start
         for j = 1:incrementor_cycle
-            incrementor_start = steps_before_incrementors+(j-1)*loop_steps*old_loop_cycle
-            incrementor_elements[n ,j] = (incrementor_block, incrementor_start)
+            elements[n ,j] = (incrementor_block, incrementor_start)
+            incrementor_start += incrementor_steps
         end
+        start += loop_steps
     end
-    chunk = PropagationChunk{Looped,A}(initial_elements, incrementor_elements)
-    return chunk, old_loop_steps+loop_steps, old_nonloop_steps+nonloop_steps
+    return elements, loop_steps
 end
 
-function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_nonlooped(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
 
-    old_loop_cycle = (old_loop_steps == 0) ? 1 : div(lcm(old_loop_steps, period_steps), old_loop_steps)
-    nonloop_steps = 0
-    initial_elements = Vector{SeqElement{T,N}}(undef, old_loop_cycle)
+    old_cycle = (loop_steps == 0) ? 1 : div(lcm(loop_steps, period_steps), loop_steps)
+    initial_elements = Vector{SeqElement{T,N}}(undef, old_cycle)
 
-    for n = 1:old_loop_cycle
-        start = old_nonloop_steps+(n-1)*old_loop_steps
-        nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
+    nonloop_element, steps = build_before_loop!(sequence, loop, parameters)
+    start = nonloop_steps
+    for n = 1:old_cycle
         initial_elements[n] = (nonloop_element, start)
+        start += loop_steps
     end
 
     incrementor_elements = Array{SeqElement{T,N},2}(undef, 0, 0)
     chunk = PropagationChunk{NonLooped,A}(initial_elements, incrementor_elements)
-    return chunk, old_loop_steps, old_nonloop_steps+nonloop_steps
+    return chunk, loop_steps, nonloop_steps+steps
 end
 
 """
