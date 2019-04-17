@@ -141,7 +141,8 @@ function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {
     end
 
     if detection_loop[end] < length(sequence.pulses)
-        last_chunk, loop_steps, nonloop_steps = build_nonlooped(sequence, n, loop_steps, nonloop_steps, parameters, A)
+        last_chunk, loop_steps, nonloop_steps = build_nonlooped(sequence, length(detection_loop)+1, loop_steps,
+            nonloop_steps, parameters, A)
     else
         last_chunk = PropagationChunk{NonLooped,A,T,N}()
     end
@@ -227,10 +228,10 @@ function build_nonlooped(sequence::Sequence{T,N}, loop, old_loop_steps, old_nonl
     for n = 1:old_loop_cycle
         start = old_nonloop_steps+(n-1)*old_loop_steps
         nonloop_element, nonloop_steps = build_before_loop!(sequence, loop, parameters)
-        initial[n] = (loop_element, start)
+        initial_elements[n] = (nonloop_element, start)
     end
 
-    incrementor_elements = Array{SeqElement{T,N},2}()
+    incrementor_elements = Array{SeqElement{T,N},2}(undef, 0, 0)
     chunk = PropagationChunk{NonLooped,A}(initial_elements, incrementor_elements)
     return chunk, old_loop_steps, old_nonloop_steps+nonloop_steps
 end
