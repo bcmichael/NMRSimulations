@@ -18,8 +18,8 @@ function rfdr(M=CPUSingleMode, ::Type{T} = Float64) where T
     p = sparse(kron_up(x, 1, 2))
     detect = sparse(kron_up(x+im*y, 2, 2))
 
-    crystallites, weights = get_crystallites("test/rep100.cry", T)
-    spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
+    crystallites = read_crystallites("test/rep100.cry", T)
+    spec = powder_average(sequence, H, p, detect, crystallites, parameters)
 
     return spec
 end
@@ -32,12 +32,12 @@ function sidebands()
     z = Z(Array{Complex{Float64}})
     p = sparse(kron_up(x, 1, 1))
     detect = sparse(kron_up(x+im*y, 1, 1))
-    crystallites, weights = get_crystallites("test/rep100.cry")
+    crystallites = read_crystallites("test/rep100.cry")
     sequence = Sequence([Pulse(31.25, 0, 0)], 1024, [1])
 
     parameters = SimulationParameters(800, 1.25, 100, spins)
 
-    spec = powder_average(sequence, cs, p, detect, crystallites, weights, parameters)
+    spec = powder_average(sequence, cs, p, detect, crystallites, parameters)
 
     return spec
 end
@@ -52,7 +52,7 @@ function redor()
     z = Z(SparseMatrixCSC{Complex{Float64}})
     p = kron_up(x, 1, 2)
     detect = kron_up(x+im*y, 1, 2)
-    crystallites, weights = get_crystallites("test/rep100.cry")
+    crystallites = read_crystallites("test/rep100.cry")
 
     d45 = Pulse(45, 0, 0, 0, 0)
     redor = Block([d45,
@@ -64,7 +64,7 @@ function redor()
 
     parameters = SimulationParameters(100, 1, 100, spins)
 
-    spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
+    spec = powder_average(sequence, H, p, detect, crystallites, parameters)
     return spec
 end
 
@@ -94,11 +94,11 @@ function ubi(a,T::Type = Float64)
 
     p = sparse(kron_up(x, 1, a))
     detect = sparse(kron_up(x+im*y, 2, a))
-    crystallites,weights = get_crystallites("test/rep100.cry", T)
+    crystallites = read_crystallites("test/rep100.cry", T)
 
     parameters = SimulationParameters{CPUSingleMode,T}(100, 1, 10, spins)
 
-    spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
+    spec = powder_average(sequence, H, p, detect, crystallites, parameters)
     return spec
 end
 
@@ -123,8 +123,8 @@ function rfdr_long(M=CPUSingleMode)
     p = sparse(kron_up(x, 1, 2))
     detect = sparse(kron_up(x+im*y, 2, 2))
 
-    crystallites, weights = get_crystallites("test/rep100.cry")
-    spec = powder_average(sequence, H, p, detect, crystallites, weights, parameters)
+    crystallites = read_crystallites("test/rep100.cry")
+    spec = powder_average(sequence, H, p, detect, crystallites, parameters)
 
     return spec
 end

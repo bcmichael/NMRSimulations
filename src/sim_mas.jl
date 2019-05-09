@@ -541,28 +541,6 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     return spec
 end
 
-"""
-    get_crystallites(crystal_file, T=Float64)
-
-Read 'crystal_file' and return a vector of EulerAngles{T} using α and β values
-from the file and γ=0 as well as a vector of weights for each crystallite.
-"""
-function get_crystallites(crystal_file, ::Type{T}=Float64) where {T<:AbstractFloat}
-    f = open(crystal_file)
-    number = parse(Int64, chomp(readline(f)))
-    raw = readlines(f)
-    close(f)
-
-    angles = Array{EulerAngles{T}}(undef, number)
-    weights = Array{T}(undef, number)
-    for n = 1:number
-        as_str = split(chomp(raw[n]))
-        angles[n] = EulerAngles{T}(parse(T, as_str[1]), parse(T, as_str[2]), 0)
-        weights[n] = parse(T, as_str[3])
-    end
-    return angles, weights
-end
-
 function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::Sequence{T,N}, dims) where {M,T,A,N}
     push!(parameters.temps, Propagator(A(undef, dims)))
     prop_generator = build_generator(sequence, parameters, A)
@@ -577,35 +555,35 @@ end
 Run the simulation for each crystallite and return a weighted sum of the
 results.
 """
-function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector,
-    crystallites::Vector{EulerAngles{T}}, weights::Vector{T}, parameters::SimulationParameters{CPUSingleMode,T,A}) where {T,A}
+function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
+    parameters::SimulationParameters{CPUSingleMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
     loops = sequence.repeats
     spec = zeros(Complex{T}, 1, loops)
     spec_crystallite = zeros(Complex{T}, 1, loops)
 
-    H = [Hamiltonian(euler_rotation(Hint, crystal_angles)) for crystal_angles in crystallites]
+    H = [Hamiltonian(euler_rotation(Hint, crystal_angles)) for crystal_angles in crystallites.angles]
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
 
     for n = 1:length(crystallites)
         fill!(spec_crystallite, 0)
-        spec .+= weights[n].*γ_average!(spec_crystallite, sequence, H[n], ρ0, detector, prop_generator, prop_cache,
-            parameters)
+        spec .+= crystallites.weights[n].*γ_average!(spec_crystallite, sequence, H[n], ρ0, detector, prop_generator,
+            prop_cache, parameters)
     end
     return spec./nγ
 end
 
-function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector,
-    crystallites::Vector{EulerAngles{T}}, weights::Vector{T}, parameters::SimulationParameters{GPUSingleMode,T,A}) where {T,A}
+function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
+    parameters::SimulationParameters{GPUSingleMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
     loops = sequence.repeats
     spec = zeros(Complex{T}, 1, loops)
     spec_crystallite = CuArray(zeros(Complex{T}, 1, loops, length(occupied_columns(detector))))
 
-    H = [Hamiltonian(euler_rotation(Hint, crystal_angles), CuArray) for crystal_angles in crystallites]
+    H = [Hamiltonian(euler_rotation(Hint, crystal_angles), CuArray) for crystal_angles in crystallites.angles]
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
 
@@ -614,18 +592,18 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
         spec3 = Array(γ_average!(spec_crystallite, sequence, H[n], CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector),
             prop_generator, prop_cache, parameters))
         spec2 = dropdims(sum(spec3, dims=3), dims=3)
-        spec .+= weights[n].*spec2
+        spec .+= crystallites.weights[n].*spec2
     end
     return spec./nγ
 end
 
-function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector,
-    crystallites::Vector{EulerAngles{T}}, weights::Vector{T},parameters::SimulationParameters{GPUBatchedMode,T,A}) where {T,A}
+function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
+    parameters::SimulationParameters{GPUBatchedMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
     loops = sequence.repeats
 
-    H = Hamiltonian([euler_rotation(Hint, crystal_angles) for crystal_angles in crystallites], CuArray)
+    H = Hamiltonian([euler_rotation(Hint, crystal_angles) for crystal_angles in crystallites.angles], CuArray)
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H.s00.data))
 
@@ -634,7 +612,7 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
     spec3 = Array(γ_average!(spec_d, sequence, H, CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector), prop_generator,
         prop_cache, parameters))
     spec2 = dropdims(sum(spec3, dims=3), dims=3)
-    spec2 .*= weights
+    spec2 .*= crystallites.weights
     spec = sum(spec2, dims=1)
     return spec./nγ
 end
@@ -643,8 +621,8 @@ const DStructures{A,T,N} = Tuple{SimulationParameters{CPUMultiProcess,T,A},
                            PropagationGenerator{A,T,N},
                            SimCache{T,N,A}} where {A,T,N}
 
-function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, detector,
-    crystallites::Vector{EulerAngles{T}}, weights::Vector{T},parameters::SimulationParameters{CPUMultiProcess,T,A}) where {T,A,N}
+function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
+    parameters::SimulationParameters{CPUMultiProcess,T,A}) where {T,A,N}
 
     nγ = parameters.nγ
     loops = sequence.repeats
@@ -657,8 +635,9 @@ function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, det
     spec = @distributed (+) for n = 1:length(crystallites)
         parameters, prop_generator, prop_cache = structures[:L]
         spec_crystallite = zeros(Complex{T}, 1, loops)
-        H = Hamiltonian(euler_rotation(Hint, crystallites[n]))
-        weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, prop_cache, parameters)
+        H = Hamiltonian(euler_rotation(Hint, crystallites.angles[n]))
+        crystallites.weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, prop_cache,
+            parameters)
     end
     return spec./nγ
 end
