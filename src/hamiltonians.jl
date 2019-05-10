@@ -156,7 +156,7 @@ function phase_rotator(phases::NTuple{N,T}, xyz) where {T,N}
             rotation_diagonal[j] += phase*z[j, j]
         end
     end
-    rotation_diagonal .= exp.(rotation_diagonal.*im.*pi./180)
+    rotation_diagonal .= exp.(-rotation_diagonal.*im.*pi./180)
     element_wise_rotator = rotation_diagonal.*rotation_diagonal'
     return element_wise_rotator
 end
