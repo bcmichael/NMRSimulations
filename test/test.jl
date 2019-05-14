@@ -42,6 +42,11 @@ include("examples.jl")
         @test Spin{Float32}(1,a...,b...) isa Spin{Float32}
         @test Spin{Float32}(1,a...,c) isa Spin{Float32}
         @test Spin(1,Float32.(a)...,b...) isa Spin{Float64}
+        @test check_spins([Spin(1,a...,c)]) == 1
+        @test check_spins([Spin(1,a...,c),Spin(1,b...,c)]) == 1
+        @test check_spins([Spin(1,a...,c),Spin(2,b...,c)]) == 2
+        @test_throws ArgumentError check_spins([Spin(1,a...,c),Spin(3,b...,c)])
+        @test_throws ArgumentError check_spins([Spin(0,a...,c)])
     end
 
     @testset "Pulse" begin

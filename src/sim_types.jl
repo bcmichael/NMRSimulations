@@ -242,8 +242,8 @@ SimulationParameters(period_steps, step_size, nγ, spins) =
 
 function check_spins(spins)
     channels = [spin.channel for spin in spins]
-    any(channels .< 1) && error("Channel indices cannot be less than 1")
-    maximum(channels) == length(unique(channels)) || ("Channel indices should not skip any numbers")
+    any(channels .< 1) && throw(ArgumentError("Channel indices cannot be less than 1"))
+    maximum(channels) == length(unique(channels)) || throw(ArgumentError("Channel indices should not skip any numbers"))
 
     return maximum(channels)
 end
