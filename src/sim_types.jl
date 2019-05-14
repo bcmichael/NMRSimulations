@@ -153,12 +153,14 @@ struct Sequence{T<:AbstractFloat,N}
     repeats::Int
     detection_loop::Vector{Int}
 
-    Sequence{T,N}(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats, detection_loop) where {T<:AbstractFloat,N} =
+    function Sequence{T,N}(pulses, repeats, detection_loop) where {T<:AbstractFloat,N}
+        issorted(detection_loop) || throw(ArgumentError("detection loop must be sorted"))
         new{T,N}(pulses, repeats, detection_loop)
+    end
 
     function Sequence(pulses, repeats, detection_loop)
         T, N = partype(pulses[1])
-        return new{T,N}(pulses, repeats, detection_loop)
+        return Sequence{T,N}(pulses, repeats, detection_loop)
     end
 
     function Sequence{T}(pulses, repeats, detection_loop) where T<:AbstractFloat
@@ -166,12 +168,12 @@ struct Sequence{T<:AbstractFloat,N}
         if typeof(pulses) != Vector{Union{Pulse{T,N},Block{T,N}}}
             pulses = convert_pulses(pulses, T, N)
         end
-        return new{T,N}(pulses, repeats, detection_loop)
+        return Sequence{T,N}(pulses, repeats, detection_loop)
     end
 
     function Sequence{T}(sequence::Sequence{T1,N}) where {T<:AbstractFloat,T1,N}
         pulses = convert_pulses(sequence.pulses, T, N)
-        return new{T,N}(pulses, sequence.repeats, sequence.detection_loop)
+        return Sequence{T,N}(pulses, sequence.repeats, sequence.detection_loop)
     end
 end
 

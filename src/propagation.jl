@@ -130,7 +130,6 @@ used in the propagators.
 """
 function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
     detection_loop = sequence.detection_loop
-    issorted(detection_loop) || error("detection loop must be sorted")
 
     loop_steps = 0
     nonloop_steps = 1

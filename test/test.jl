@@ -93,9 +93,12 @@ include("examples.jl")
             b=Block([a,a])
             @test Sequence([a],2,[1]) isa Sequence{Float64,n}
             @test Sequence([b],2,[1]) isa Sequence{Float64,n}
-            # @test Sequence([a,b],2,[1]) isa Sequence{Float64,n}
-            # c=Sequence([a,b],2,[1])
-            # @test Sequence{Float32}(c) isa Sequence{Float32,n}
+            @test Sequence([a,b],2,[1]) isa Sequence{Float64,n}
+            @test Sequence{Float32}([a,b],2,[1]) isa Sequence{Float32,n}
+            c=Sequence([a,b],2,[1])
+            @test Sequence{Float32}(c) isa Sequence{Float32,n}
+            @test_throws ArgumentError Sequence([a,b],2,[2, 1])
+            @test_throws MethodError Sequence{Float32,4}([a,b],2,[1])
         end
     end
 
