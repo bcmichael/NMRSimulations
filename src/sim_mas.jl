@@ -284,10 +284,14 @@ function build_propagator!(U, rf, timing, parameters)
         cycle_size = 2*nγ
     end
 
-    copyto!(U, combinations[mod1(start, cycle_size)])
-    for n = start+1:start+remain-1
-        mul!(temp, combinations[mod1(n, cycle_size)], U)
-        U, temp = temp, U
+    if remain != 0
+        copyto!(U, combinations[mod1(start, cycle_size)])
+        for n = start+1:start+remain-1
+            mul!(temp, combinations[mod1(n, cycle_size)], U)
+            U, temp = temp, U
+        end
+    else
+        fill_diag!(U,1)
     end
 
     if cycles>0
