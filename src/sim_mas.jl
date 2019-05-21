@@ -554,7 +554,7 @@ function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::S
 end
 
 """
-    powder_average(sequence, Hint, ρ0, detector, crystallites, weights, parameters)
+    powder_average(sequence, Hint, ρ0, detector, crystallites, parameters)
 
 Run the simulation for each crystallite and return a weighted sum of the
 results.
