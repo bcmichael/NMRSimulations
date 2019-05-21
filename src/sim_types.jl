@@ -148,33 +148,53 @@ function collapse_block(pulses::Vector{Union{Pulse{T,N},Block{T,N}}}, repeats) w
     return out, rank
 end
 
-struct Sequence{T<:AbstractFloat,N}
+struct Dimension
+    elements::Vector{Int}
+    size::Int
+
+    function Dimension(elements, size)
+        issorted(elements) || throw(ArgumentError("Dimension elements must be sorted"))
+        new(elements, size)
+    end
+end
+
+Dimension(a::Tuple{Vector{Int},Int}) = Dimension(a[1], a[2])
+
+struct Sequence{T<:AbstractFloat,N,D}
     pulses::Vector{Union{Pulse{T,N},Block{T,N}}}
-    repeats::Int
-    detection_loop::Vector{Int}
+    dimensions::NTuple{D,Dimension}
 
-    function Sequence{T,N}(pulses, repeats, detection_loop) where {T<:AbstractFloat,N}
-        issorted(detection_loop) || throw(ArgumentError("detection loop must be sorted"))
-        new{T,N}(pulses, repeats, detection_loop)
+    function Sequence{T,N}(pulses, dimensions) where {T<:AbstractFloat,N}
+        D = length(dimensions)
+        dimensions = NTuple{D,Dimension}(Dimension(n) for n in dimensions)
+        check_dimensions(pulses, dimensions)
+        new{T,N,D}(pulses, dimensions)
     end
 
-    function Sequence(pulses, repeats, detection_loop)
+    function Sequence(pulses, dimensions)
         T, N = partype(pulses[1])
-        return Sequence{T,N}(pulses, repeats, detection_loop)
+        return Sequence{T,N}(pulses, dimensions)
     end
 
-    function Sequence{T}(pulses, repeats, detection_loop) where T<:AbstractFloat
+    function Sequence{T}(pulses, dimensions) where T<:AbstractFloat
         _, N = partype(pulses[1])
         if typeof(pulses) != Vector{Union{Pulse{T,N},Block{T,N}}}
             pulses = convert_pulses(pulses, T, N)
         end
-        return Sequence{T,N}(pulses, repeats, detection_loop)
+        return Sequence{T,N}(pulses, dimensions)
     end
 
-    function Sequence{T}(sequence::Sequence{T1,N}) where {T<:AbstractFloat,T1,N}
+    function Sequence{T}(sequence::Sequence{T1,N,D}) where {T<:AbstractFloat,T1,N,D}
         pulses = convert_pulses(sequence.pulses, T, N)
-        return Sequence{T,N}(pulses, sequence.repeats, sequence.detection_loop)
+        return new{T,N,D}(pulses, sequence.dimensions)
     end
+end
+
+function check_dimensions(pulses, dimensions)
+    for n in 2:length(dimensions)
+        dimensions[n].elements[1] > dimensions[n-1].elements[end] || throw(ArgumentError("All elements of dimension $n must be after those of dimension $(n-1)"))
+    end
+    dimensions[end].elements[end] <= length(pulses) || throw(ArgumentError("Dimension elements cannot exceed the number of elements"))
 end
 
 function convert_pulses(pulses, ::Type{T}, N) where {T}

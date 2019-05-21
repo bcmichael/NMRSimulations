@@ -48,9 +48,10 @@ end
 
 function propagate!(spec::CuArray, Uloop, ρ0, detector, prop_generator, parameters)
     state = 1
-    for n = 1:size(spec, 2)
-        Uloop, state = next!(prop_generator, Uloop, state, parameters.temps)
-        spec = detect!(spec, Uloop, ρ0, detector, detector.occupied_cols, n, parameters.temps[1])
+    num = reduce(*, prop_generator.size)
+    for n = 1:num
+        Uloop, position, state = next!(prop_generator, Uloop, state, parameters.temps)
+        spec = detect!(spec, Uloop, ρ0, detector, detector.occupied_cols, position, parameters.temps[1])
     end
 
     return spec, Uloop
@@ -92,7 +93,7 @@ function kernel_detect!(Uloop, ρ0colptr, ρ0rowval, ρ0nzval::CuDeviceArray{T,1
 
     # write to global memory
     if col == 1
-        results[blockIdx().y, loop,blockIdx().x] += accumulated
+        results[blockIdx().x, blockIdx().y, loop] += accumulated
     end
 
     return nothing

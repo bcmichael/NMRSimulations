@@ -75,9 +75,10 @@ propagators, the 'detector' operator, and the initial density operator 'ρ0'.
 function propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
     unique_cols = occupied_columns(detector)
     state = 1
-    for n = 1:size(spec, 2)
-        Uloop, state = next!(prop_generator, Uloop, state, parameters.temps)
-        spec = detect!(spec, Uloop, ρ0, detector, unique_cols, n, parameters.temps[1])
+    num = reduce(*, prop_generator.size)
+    for n = 1:num
+        Uloop, position, state = next!(prop_generator, Uloop, state, parameters.temps)
+        spec = detect!(spec, Uloop, ρ0, detector, unique_cols, position, parameters.temps[1])
     end
 
     return spec, Uloop
@@ -129,8 +130,10 @@ function find_pulses!(prop_cache, block::Block, start, parameters)
 end
 
 function find_pulses!(prop_cache, prop_generator::PropagationGenerator, parameters)
-    for chunk in prop_generator.loops
-        find_pulses!(prop_cache, chunk, parameters)
+    for dim in prop_generator.loops
+        for chunk in dim.chunks
+            find_pulses!(prop_cache, chunk, parameters)
+        end
     end
     find_pulses!(prop_cache, prop_generator.nonloop, parameters)
     return prop_cache
@@ -435,9 +438,14 @@ function allocate_propagators!(block_cache::BlockCache, parameters)
 end
 
 function allocate_propagators!(prop_generator::PropagationGenerator, parameters)
-    for chunk in prop_generator.loops
-        for index in eachindex(chunk.current)
-            chunk.current[index] = similar(parameters.temps[1])
+    for dim in prop_generator.loops
+        for chunk in dim.chunks
+            for index in eachindex(chunk.current)
+                chunk.current[index] = similar(parameters.temps[1])
+            end
+        end
+        for index in eachindex(dim.propagators)
+            dim.propagators[index] = similar(parameters.temps[1])
         end
     end
 end
@@ -561,13 +569,12 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
     parameters::SimulationParameters{CPUSingleMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
-    loops = sequence.repeats
-    spec = zeros(Complex{T}, 1, loops)
-    spec_crystallite = zeros(Complex{T}, 1, loops)
 
     H = [Hamiltonian(euler_rotation(Hint, crystal_angles)) for crystal_angles in crystallites.angles]
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
+    spec = zeros(Complex{T}, 1, prop_generator.size...)
+    spec_crystallite = zeros(Complex{T}, 1, prop_generator.size...)
 
     for n = 1:length(crystallites)
         fill!(spec_crystallite, 0)
@@ -581,19 +588,18 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
     parameters::SimulationParameters{GPUSingleMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
-    loops = sequence.repeats
-    spec = zeros(Complex{T}, 1, loops)
-    spec_crystallite = CuArray(zeros(Complex{T}, 1, loops, length(occupied_columns(detector))))
 
     H = [Hamiltonian(euler_rotation(Hint, crystal_angles), CuArray) for crystal_angles in crystallites.angles]
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H[1].s00.data))
+    spec = zeros(Complex{T}, 1, prop_generator.size...)
+    spec_crystallite = CuArray(zeros(Complex{T}, length(occupied_columns(detector)), 1, prop_generator.size...))
 
     for n = 1:length(crystallites)
         fill!(spec_crystallite, 0)
         spec3 = Array(γ_average!(spec_crystallite, sequence, H[n], CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector),
             prop_generator, prop_cache, parameters))
-        spec2 = dropdims(sum(spec3, dims=3), dims=3)
+        spec2 = dropdims(sum(spec3, dims=1), dims=1)
         spec .+= crystallites.weights[n].*spec2
     end
     return spec./nγ
@@ -603,17 +609,16 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
     parameters::SimulationParameters{GPUBatchedMode,T,A}) where {T,A}
 
     nγ = parameters.nγ
-    loops = sequence.repeats
 
     H = Hamiltonian([euler_rotation(Hint, crystal_angles) for crystal_angles in crystallites.angles], CuArray)
 
     parameters, prop_generator, prop_cache = prepare_structures(parameters, sequence, size(H.s00.data))
 
-    spec_d = CuArray(zeros(Complex{T}, length(crystallites), loops, length(occupied_columns(detector))))
+    spec_d = CuArray(zeros(Complex{T}, length(occupied_columns(detector)), length(crystallites), prop_generator.size...))
 
     spec3 = Array(γ_average!(spec_d, sequence, H, CuSparseMatrixCSC(ρ0), CuSparseMatrixCSC(detector), prop_generator,
         prop_cache, parameters))
-    spec2 = dropdims(sum(spec3, dims=3), dims=3)
+    spec2 = dropdims(sum(spec3, dims=1), dims=1)
     spec2 .*= crystallites.weights
     spec = sum(spec2, dims=1)
     return spec./nγ
@@ -627,7 +632,6 @@ function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, det
     parameters::SimulationParameters{CPUMultiProcess,T,A}) where {T,A,N}
 
     nγ = parameters.nγ
-    loops = sequence.repeats
 
     dims = size(Hint.s00)
 
@@ -636,7 +640,7 @@ function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, det
 
     spec = @distributed (+) for n = 1:length(crystallites)
         parameters, prop_generator, prop_cache = structures[:L]
-        spec_crystallite = zeros(Complex{T}, 1, loops)
+        spec_crystallite = zeros(Complex{T}, 1, prop_generator.size...)
         H = Hamiltonian(euler_rotation(Hint, crystallites.angles[n]))
         crystallites.weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, prop_cache,
             parameters)

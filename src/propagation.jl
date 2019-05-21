@@ -85,25 +85,43 @@ struct PropagationChunk{L<:PropagationType,A<:AbstractArray,T<:AbstractFloat,N}
         Array{Propagator{T,A},2}(undef,(0,0)))
 end
 
-struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N}
-    loops::Vector{PropagationChunk{Looped,A,T,N}}
-    nonloop::PropagationChunk{NonLooped,A,T,N}
+struct PropagationDimension{A<:AbstractArray,T<:AbstractFloat,N}
+    chunks::Array{PropagationChunk{Looped,A,T,N},2}
+    propagators::Array{Propagator{T,A},2}
+    start_cycle::Int
+    cycle::Int
+
+    function PropagationDimension(chunks::Array{PropagationChunk{Looped,A,T,N},2}, count, cycle) where {A,T,N}
+        start_cycle = size(chunks,2)
+        propagators = Array{Propagator{T,A},2}(undef, (count, start_cycle))
+        new{A,T,N}(chunks, propagators, start_cycle, cycle)
+    end
 end
 
-function next!(A::PropagationGenerator, U, state, temps)
-    Uchunk = next!(A.loops[1], state, temps)
-    copyto!(U, Uchunk)
-    for n = 2:length(A.loops)
-        Uchunk = next!(A.loops[n], state, temps)
+struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N,D}
+    loops::NTuple{D,PropagationDimension{A,T,N}}
+    nonloop::PropagationChunk{NonLooped,A,T,N}
+    size::NTuple{D,Int}
+end
+
+function next!(G::PropagationGenerator{A,T,N,D}, U, state, temps) where {A,T,N,D}
+    position = CartesianIndices(G.size)[state]
+    copyto!(U, G.loops[1].propagators[position[1], 1])
+    end_index = Rational(position[1], G.loops[1].cycle)
+    for d = 2:D
+        start_index = Int(mod1(end_index,1)*G.loops[d].start_cycle)
+        Uchunk = G.loops[d].propagators[position[d], start_index]
+        mul!(temps[1], Uchunk, U)
+        U, temps[1] = temps[1], U
+        end_index += Rational(position[d], G.loops[d].cycle)
+    end
+    if length(G.nonloop.current)>0
+        start_index = Int(end_index%1*length(G.nonloop.current))
+        Uchunk = G.nonloop.current[]
         mul!(temps[1], Uchunk, U)
         U, temps[1] = temps[1], U
     end
-    if length(A.nonloop.current)>0
-        Uchunk = next!(A.nonloop, state)
-        mul!(temps[1], Uchunk, U)
-        U, temps[1] = temps[1], U
-    end
-    return U, state+1
+    return U, position, state+1
 end
 
 function next!(A::PropagationChunk{Looped}, state, temps)
@@ -116,11 +134,6 @@ function next!(A::PropagationChunk{Looped}, state, temps)
     return A.current[index]
 end
 
-function next!(A::PropagationChunk{NonLooped}, state)
-    index = mod1(state, length(A.current))
-    return A.current[index]
-end
-
 """
     build_generator!(sequence, parameters, A)
 
@@ -128,46 +141,69 @@ Build a generator which can subsequently be used to generate the propagators for
 each step of the detection loop of 'sequence'. 'A' is the type of Array to be
 used in the propagators.
 """
-function build_generator(sequence::Sequence{T,N}, parameters, ::Type{A}) where {T,N,A}
-    detection_loop = sequence.detection_loop
+function build_generator(sequence::Sequence{T,N,D}, parameters, ::Type{A}) where {T,N,A,D}
+    period_steps = parameters.period_steps
 
-    loop_steps = 0
+    dim_loops = Vector{PropagationDimension{A,T,N}}()
+    start_cycle = 1
     nonloop_steps = 1
-    loop_chunks = Vector{PropagationChunk{Looped,A,T,N}}()
-    for n = 1:length(detection_loop)
-        chunk, loop_steps, nonloop_steps = build_looped(sequence, n, loop_steps, nonloop_steps, parameters, A)
-        push!(loop_chunks, chunk)
+    for d = 1:D
+        dimension, nonloop_steps, start_cycle = build_dim(sequence, d, nonloop_steps, start_cycle, parameters, A)
+        push!(dim_loops, dimension)
     end
+    loop_steps = Int(period_steps/start_cycle)
 
-    if detection_loop[end] < length(sequence.pulses)
-        last_chunk, loop_steps, nonloop_steps = build_nonlooped(sequence, length(detection_loop)+1, loop_steps,
-            nonloop_steps, parameters, A)
+    if sequence.dimensions[end].elements[end] < length(sequence.pulses)
+        last_chunk = build_nonlooped(sequence, nonloop_steps, start_cycle, parameters, A)
     else
         last_chunk = PropagationChunk{NonLooped,A,T,N}()
     end
-    prop_generator = PropagationGenerator(loop_chunks, last_chunk)
+    prop_generator = PropagationGenerator(Tuple(dim_loops), last_chunk, Tuple(d.size for d in sequence.dimensions))
     return prop_generator
 end
 
+function build_dim(sequence::Sequence{T,N}, dim, start_step, start_cycle, parameters, ::Type{A}) where {T,N,A}
+    detection_loop = sequence.dimensions[dim].elements
+    period_steps = parameters.period_steps
+
+    chunks = Array{PropagationChunk{Looped,A,T,N},2}(undef, (length(detection_loop), start_cycle))
+    cycle_steps = Int(period_steps/start_cycle)
+
+    local loop_steps, nonloop_steps
+    for i in 1:start_cycle
+        loop_steps = 0
+        nonloop_steps = start_step+(i-1)*cycle_steps
+        for n = 1:length(detection_loop)
+            chunk, loop_steps, nonloop_steps = build_looped(sequence, dim, n, loop_steps, nonloop_steps, parameters, A)
+            chunks[n, i] = chunk
+        end
+    end
+    cycle = div(lcm(loop_steps, period_steps), loop_steps)
+    out = PropagationDimension(chunks, sequence.dimensions[dim].size, cycle)
+    return out, nonloop_steps-(start_cycle-1)*cycle_steps, lcm(start_cycle, cycle)
+end
+
 """
-    build_before_loop(sequence, loop, parameters)
+    build_before_loop(sequence, dim, loop, parameters)
 
 Build a Block containing the non-looped pulse sequence elements in 'sequence'
-prior to the looped element specified by 'loop'. The set of included elements
-starts just after the previous looped element or at the beginning of the
-'sequence' if there is none. It ends just before the specified looped element or
-at the end of the 'sequence' if 'loop' exceeds the number of looped elements in
-'sequence'. Return the Block and the length of the block in steps. If there are
-no such pulses return 'nothing' and '0'.
+prior to the looped element specified by 'loop' in the dimension specified by
+'dim'. The set of included elements starts just after the previous looped
+element or at the beginning of the 'sequence' if there is none. It ends just
+before the specified looped element. Return the Block and the length of the
+block in steps. If there are no such pulses return 'nothing' and '0'.
 """
-function build_before_loop!(sequence, loop, parameters)
+function build_before_loop(sequence, dim, loop, parameters)
     step_size = parameters.step_size
 
-    # select the range of sequence elements to examine
-    # for the first loop start at the beginning of the sequence otherwise just after the previous loop
-    # if out of loops end at the end of the sequence otherwise just before the current loop
-    first_index = (loop == 1) ? 1 : sequence.detection_loop[loop-1]+1
-    last_index = loop > length(sequence.detection_loop) ? length(sequence.pulses) : sequence.detection_loop[loop]-1
+    if dim == 1 && loop == 1 # beginning of sequence
+        first_index = 1
+    elseif dim > 1 && loop == 1 # last loop from previous dimension
+        first_index = sequence.dimensions[dim-1].elements[end]+1
+    elseif loop > 1 # previous loop from same dimension
+        first_index = sequence.dimensions[dim].elements[loop-1]+1
+    end
+    last_index = sequence.dimensions[dim].elements[loop]-1
 
     if last_index >= first_index
         element = Block(sequence.pulses[first_index:last_index])
@@ -178,21 +214,21 @@ function build_before_loop!(sequence, loop, parameters)
     end
 end
 
-function build_looped(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_looped(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
 
     old_cycle = (loop_steps == 0) ? 1 : div(lcm(loop_steps, period_steps), loop_steps)
 
-    initial, nonloop_steps = build_looped_initials(sequence, loop, loop_steps, nonloop_steps, old_cycle, parameters)
-    incrementors, loop_steps = build_incrementors(sequence, loop, loop_steps, nonloop_steps, old_cycle, parameters)
+    initial, nonloop_steps = build_looped_initials(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters)
+    incrementors, loop_steps = build_incrementors(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters)
 
     chunk = PropagationChunk{Looped,A}(initial, incrementors)
     return chunk, loop_steps, nonloop_steps
 end
 
-function build_looped_initials(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
-    loop_element = sequence.pulses[sequence.detection_loop[loop]]
-    nonloop_element, steps = build_before_loop!(sequence, loop, parameters)
+function build_looped_initials(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
+    loop_element = sequence.pulses[sequence.dimensions[dim].elements[loop]]
+    nonloop_element, steps = build_before_loop(sequence, dim, loop, parameters)
     elements = Vector{SeqElement{T,N}}(undef, old_cycle)
 
     start = nonloop_steps
@@ -213,11 +249,11 @@ function build_looped_initials(sequence::Sequence{T,N}, loop, loop_steps, nonloo
     return elements, steps+nonloop_steps
 end
 
-function build_incrementors(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
+function build_incrementors(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
-    loop_element = sequence.pulses[sequence.detection_loop[loop]]
+    loop_element = sequence.pulses[sequence.dimensions[dim].elements[loop]]
     steps = Int(duration(loop_element)/step_size)
     loop_steps += steps
 
@@ -238,22 +274,35 @@ function build_incrementors(sequence::Sequence{T,N}, loop, loop_steps, nonloop_s
     return elements, loop_steps
 end
 
-function build_nonlooped(sequence::Sequence{T,N}, loop, loop_steps, nonloop_steps, parameters, ::Type{A}) where {T,N,A}
+function build_after_loops(sequence)
+    first_index = sequence.dimensions[end].elements[end]+1
+    last_index = length(sequence.pulses)
+
+    if last_index >= first_index
+        element = Block(sequence.pulses[first_index:last_index])
+        nonloop_steps = Int(duration(element)/step_size)
+        return element, nonloop_steps
+    else
+        return nothing, 0
+    end
+end
+
+function build_nonlooped(sequence::Sequence{T,N}, nonloop_steps, start_cycle, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
 
-    old_cycle = (loop_steps == 0) ? 1 : div(lcm(loop_steps, period_steps), loop_steps)
-    initial_elements = Vector{SeqElement{T,N}}(undef, old_cycle)
+    initial_elements = Vector{SeqElement{T,N}}(undef, start_cycle)
 
-    nonloop_element, steps = build_before_loop!(sequence, loop, parameters)
+    nonloop_element = build_after_loops(sequence)
+    cycle_steps = Int(period_steps/start_cycle)
     start = nonloop_steps
-    for n = 1:old_cycle
+    for n = 1:start_cycle
         initial_elements[n] = (nonloop_element, start)
-        start += loop_steps
+        start += cycle_steps
     end
 
     incrementor_elements = Array{SeqElement{T,N},2}(undef, 0, 0)
     chunk = PropagationChunk{NonLooped,A}(initial_elements, incrementor_elements)
-    return chunk, loop_steps, nonloop_steps+steps
+    return chunk
 end
 
 """
@@ -262,9 +311,12 @@ end
 Fill in the Propagators in each PropagationChunk in 'prop_generator'.
 """
 function fill_generator!(prop_generator, prop_cache, parameters)
-    for chunk in prop_generator.loops
-        fill_chunk_copy!(chunk.current, chunk.initial_elements, prop_cache, parameters)
-        fill_chunk!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
+    for dim in prop_generator.loops
+        for chunk in dim.chunks
+            fill_chunk_copy!(chunk.current, chunk.initial_elements, prop_cache, parameters)
+            fill_chunk!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
+        end
+        materialize_dimension(dim, parameters)
     end
     fill_chunk!(prop_generator.nonloop.current, prop_generator.nonloop.initial_elements, prop_cache, parameters)
     return prop_generator
@@ -291,4 +343,21 @@ function fill_chunk!(props, elements, prop_cache, parameters)
         end
     end
     return props
+end
+
+function materialize_dimension(dimension::PropagationDimension, parameters)
+    temps = parameters.temps
+    for start in 1:size(dimension.chunks, 2)
+        for n = 1:size(dimension.propagators, 1)
+            U = dimension.propagators[n, start]
+            Uchunk = next!(dimension.chunks[1, start], n, temps)
+            copyto!(U, Uchunk)
+            for loop in 2:size(dimension.chunks, 1)
+                Uchunk = next!(dimension.chunks[loop, start], n, temps)
+                mul!(temps[1], Uchunk, U)
+                U, temps[1] = temps[1], U
+            end
+            dimension.propagators[n, start] = U
+        end
+    end
 end
