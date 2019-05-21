@@ -525,8 +525,6 @@ to 'spec'.
 function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{Hamiltonian{T,A}}, ρ0, detector,
         prop_generator, prop_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
 
-    steps = parameters.period_steps
-    step_size = parameters.step_size
     nγ = parameters.nγ
 
     build_combined_propagators!(prop_cache, Hinternal, parameters)
