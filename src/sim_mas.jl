@@ -581,7 +581,7 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
         spec .+= crystallites.weights[n].*γ_average!(spec_crystallite, sequence, H[n], ρ0, detector, prop_generator,
             prop_cache, parameters)
     end
-    return spec./nγ
+    return dropdims(spec, dims=1)./nγ
 end
 
 function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
@@ -602,7 +602,7 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
         spec2 = dropdims(sum(spec3, dims=1), dims=1)
         spec .+= crystallites.weights[n].*spec2
     end
-    return spec./nγ
+    return dropdims(spec, dims=1)./nγ
 end
 
 function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
@@ -621,7 +621,7 @@ function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detec
     spec2 = dropdims(sum(spec3, dims=1), dims=1)
     spec2 .*= crystallites.weights
     spec = sum(spec2, dims=1)
-    return spec./nγ
+    return dropdims(spec, dims=1)./nγ
 end
 
 const DStructures{A,T,N} = Tuple{SimulationParameters{CPUMultiProcess,T,A},
@@ -645,5 +645,5 @@ function powder_average(sequence::Sequence{T,N}, Hint::SphericalTensor, ρ0, det
         crystallites.weights[n].*γ_average!(spec_crystallite, sequence, H, ρ0, detector, prop_generator, prop_cache,
             parameters)
     end
-    return spec./nγ
+    return dropdims(spec, dims=1)./nγ
 end
