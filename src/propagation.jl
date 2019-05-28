@@ -1,33 +1,3 @@
-"""
-    fetch_propagator(pulse, start, prop_cache, parameters)
-
-Fetch the propagator corresponding to a given 'pulse' and 'start' step from
-'prop_cache'. Return the propagator and the number of steps used.
-"""
-function fetch_propagator(pulse::Pulse, start, prop_cache, parameters)
-    period_steps = parameters.period_steps
-    step_size = parameters.step_size
-
-    steps = Int(pulse.t/step_size)
-    timing = (mod1(start, period_steps), steps)
-    propagator = prop_cache.pulses[pulse.γB1].timings[timing].phased[pulse.phase]
-    return propagator, steps
-end
-
-"""
-    fetch_propagator(block, start, prop_cache, parameters)
-
-Fetch the propagator corresponding to a given 'block' and 'start' step from
-'prop_cache'. Return the propagator and the number of steps used.
-"""
-function fetch_propagator(block::Block, start, prop_cache, parameters)
-    period_steps = parameters.period_steps
-
-    start_period = mod1(start, period_steps)
-    U, steps = prop_cache.blocks[(block,start_period)]
-    return U, steps
-end
-
 abstract type PropagationType end
 struct Looped<:PropagationType end
 struct NonLooped<:PropagationType end
@@ -358,6 +328,19 @@ function materialize_dimension(dimension::PropagationDimension, parameters)
                 U, temps[1] = temps[1], U
             end
             dimension.propagators[n, start] = U
+        end
+    end
+end
+
+function allocate_propagators!(prop_generator::PropagationGenerator, parameters)
+    for dim in prop_generator.loops
+        for chunk in dim.chunks
+            for index in eachindex(chunk.current)
+                chunk.current[index] = similar(parameters.temps[1])
+            end
+        end
+        for index in eachindex(dim.propagators)
+            dim.propagators[index] = similar(parameters.temps[1])
         end
     end
 end
