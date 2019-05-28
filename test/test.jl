@@ -355,6 +355,7 @@ end
     @test size(a.loops[1].chunks) == (1,1)
     @test a.loops[1].start_cycle == 1
     @test a.loops[1].cycle == 32
+    @test length(a.final) == 0
 
     d45 = Pulse(45, 0, 0, 0, 0)
     redor_b = Block([d45,
@@ -370,6 +371,7 @@ end
     @test size(b.loops[1].chunks) == (2,1)
     @test b.loops[1].start_cycle == 1
     @test b.loops[1].cycle == 1
+    @test length(a.final) == 0
 
     seq = Sequence{Float32}([Pulse(20, 0, 0),
                              Pulse(2, 125, 270),
@@ -387,6 +389,7 @@ end
     @test c.loops[1].cycle == 5
     @test c.loops[2].start_cycle == 5
     @test c.loops[2].cycle == 25
+    @test length(a.final) == 0
 end
 
 @testset "sim_mas" begin

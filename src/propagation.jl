@@ -52,6 +52,8 @@ struct PropagationFinal{A<:AbstractArray,T<:AbstractFloat,N}
     PropagationFinal{A,T,N}() where {A,T,N} = new{A,T,N}(Vector{SeqElement{T,N}}(), Vector{Propagator{T,A}}())
 end
 
+length(a::PropagationFinal) = length(a.elements)
+
 struct PropagationDimension{A<:AbstractArray,T<:AbstractFloat,N}
     chunks::Array{PropagationChunk{A,T,N},2}
     propagators::Array{Propagator{T,A},2}
@@ -90,8 +92,8 @@ function iterate(G::PropagationGenerator{A,T,N,D}, state=1) where {A,T,N,D}
         U, temp = temp, U
         end_index += Rational(position[d], G.loops[d].cycle)
     end
-    if length(G.final.propagators)>0
-        start_index = Int(end_index%1*length(G.final.propagators))
+    if length(G.final)>0
+        start_index = Int(end_index%1*length(G.final))
         Uchunk = G.final.propagators[start_index]
         mul!(temp, Uchunk, U)
         U, temp = temp, U
