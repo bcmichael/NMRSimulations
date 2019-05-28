@@ -1,19 +1,15 @@
 """
-    propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
+    propagate!(spec, ρ0, detector, prop_generator)
 
 Iterate through 'prop_generator' and calculate the signal using the resulting
 propagators, the 'detector' operator, and the initial density operator 'ρ0'.
 """
-function propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
+function propagate!(spec, ρ0, detector, prop_generator)
     unique_cols = occupied_columns(detector)
-    state = 1
-    num = reduce(*, prop_generator.size)
-    for n = 1:num
-        Uloop, position, state = next!(prop_generator, Uloop, state, parameters.temps)
-        spec = detect!(spec, Uloop, ρ0, detector, unique_cols, position, parameters.temps[1])
+    for (U, position) in prop_generator
+        detect!(spec, U, ρ0, detector, unique_cols, position, prop_generator.temps[1])
     end
-
-    return spec, Uloop
+    return spec
 end
 
 function occupied_columns(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
@@ -98,21 +94,22 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{H
     build_combined_propagators!(prop_cache, Hinternal, parameters)
     build_pulse_props!(prop_cache.pulses, parameters)
 
-    Uloop = similar(parameters.temps[1])
     for n = 1:nγ
         if n != 1
             γiterate_pulse_propagators!(prop_cache.pulses, parameters, n)
         end
 
         build_block_props!(prop_cache, parameters)
-        prop_generator = fill_generator!(prop_generator, prop_cache, parameters)
-        spec, Uloop = propagate!(spec, Uloop, ρ0, detector, prop_generator, parameters)
+        fill_generator!(prop_generator, prop_cache, parameters)
+        propagate!(spec, ρ0, detector, prop_generator)
     end
     return spec
 end
 
 function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::Sequence{T,N}, dims) where {M,T,A,N}
-    push!(parameters.temps, Propagator(A(undef, dims)))
+    for n = 1:2
+        push!(parameters.temps, Propagator(A(undef, dims)))
+    end
     prop_generator = build_generator(sequence, parameters, A)
     allocate_propagators!(prop_generator, parameters)
     prop_cache = build_prop_cache(prop_generator, dims, parameters)

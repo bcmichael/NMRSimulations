@@ -1,3 +1,5 @@
+import Base: length, iterate
+
 abstract type PropagationType end
 struct Looped<:PropagationType end
 struct NonLooped<:PropagationType end
@@ -72,26 +74,36 @@ struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N,D}
     loops::NTuple{D,PropagationDimension{A,T,N}}
     nonloop::PropagationChunk{NonLooped,A,T,N}
     size::NTuple{D,Int}
+    temps::Vector{Propagator{T,A}} # will be the same as parameters.temps
 end
 
-function next!(G::PropagationGenerator{A,T,N,D}, U, state, temps) where {A,T,N,D}
+length(G::PropagationGenerator) = reduce(*, G.size)
+
+function iterate(G::PropagationGenerator{A,T,N,D}, state=1) where {A,T,N,D}
+    state <= length(G) || return nothing
+
+    U = pop!(G.temps)
+    temp = pop!(G.temps)
+
     position = CartesianIndices(G.size)[state]
     copyto!(U, G.loops[1].propagators[position[1], 1])
     end_index = Rational(position[1], G.loops[1].cycle)
     for d = 2:D
         start_index = Int(mod1(end_index,1)*G.loops[d].start_cycle)
         Uchunk = G.loops[d].propagators[position[d], start_index]
-        mul!(temps[1], Uchunk, U)
-        U, temps[1] = temps[1], U
+        mul!(temp, Uchunk, U)
+        U, temp = temp, U
         end_index += Rational(position[d], G.loops[d].cycle)
     end
     if length(G.nonloop.current)>0
         start_index = Int(end_index%1*length(G.nonloop.current))
         Uchunk = G.nonloop.current[start_index]
-        mul!(temps[1], Uchunk, U)
-        U, temps[1] = temps[1], U
+        mul!(temp, Uchunk, U)
+        U, temp = temp, U
     end
-    return U, position, state+1
+    push!(G.temps,temp)
+    push!(G.temps,U)
+    return (U, position), state+1
 end
 
 function next!(A::PropagationChunk{Looped}, state, temps)
@@ -128,7 +140,7 @@ function build_generator(sequence::Sequence{T,N,D}, parameters, ::Type{A}) where
     else
         last_chunk = PropagationChunk{NonLooped,A,T,N}()
     end
-    prop_generator = PropagationGenerator(Tuple(dim_loops), last_chunk, Tuple(d.size for d in sequence.dimensions))
+    prop_generator = PropagationGenerator(Tuple(dim_loops), last_chunk, Tuple(d.size for d in sequence.dimensions), parameters.temps)
     return prop_generator
 end
 
