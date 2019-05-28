@@ -117,13 +117,12 @@ function next!(A::PropagationChunk{Looped}, state, temps)
 end
 
 """
-    build_generator!(sequence, parameters, A)
+    build_generator!(sequence, parameters)
 
 Build a generator which can subsequently be used to generate the propagators for
-each step of the detection loop of 'sequence'. 'A' is the type of Array to be
-used in the propagators.
+each step of the detection loop of 'sequence'.
 """
-function build_generator(sequence::Sequence{T,N,D}, parameters, ::Type{A}) where {T,N,A,D}
+function build_generator(sequence::Sequence{T,N,D}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A,D}
     period_steps = parameters.period_steps
 
     dim_loops = Vector{PropagationDimension{A,T,N}}()

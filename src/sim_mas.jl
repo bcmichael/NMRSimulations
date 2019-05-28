@@ -110,7 +110,7 @@ function prepare_structures(parameters::SimulationParameters{M,T,A}, sequence::S
     for n = 1:2
         push!(parameters.temps, Propagator(A(undef, dims)))
     end
-    prop_generator = build_generator(sequence, parameters, A)
+    prop_generator = build_generator(sequence, parameters)
     allocate_propagators!(prop_generator, parameters)
     prop_cache = build_prop_cache(prop_generator, dims, parameters)
     return (parameters, prop_generator, prop_cache)
