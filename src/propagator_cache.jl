@@ -144,19 +144,18 @@ end
 function find_pulses!(prop_cache, prop_generator::PropagationGenerator, parameters)
     for dim in prop_generator.loops
         for chunk in dim.chunks
-            find_pulses!(prop_cache, chunk, parameters)
+            find_pulses!(prop_cache, chunk.initial_elements, parameters)
+            find_pulses!(prop_cache, chunk.incrementor_elements, parameters)
         end
     end
-    find_pulses!(prop_cache, prop_generator.nonloop, parameters)
+    find_pulses!(prop_cache, prop_generator.final.elements, parameters)
     return prop_cache
 end
 
-function find_pulses!(prop_cache, chunk::PropagationChunk, parameters)
-    for elements in (chunk.initial_elements, chunk.incrementor_elements)
-        for index in eachindex(elements)
-            if isassigned(elements, index)
-                find_pulses!(prop_cache, elements[index][1], elements[index][2], parameters)
-            end
+function find_pulses!(prop_cache, elements::Array{SeqElement{T,N}}, parameters) where {T,N}
+    for index in eachindex(elements)
+        if isassigned(elements, index)
+            find_pulses!(prop_cache, elements[index][1], elements[index][2], parameters)
         end
     end
     return prop_cache
