@@ -117,7 +117,7 @@ function next!(G::PropagationGenerator{A,T,N,D}, U, state, temps) where {A,T,N,D
     end
     if length(G.nonloop.current)>0
         start_index = Int(end_index%1*length(G.nonloop.current))
-        Uchunk = G.nonloop.current[]
+        Uchunk = G.nonloop.current[start_index]
         mul!(temps[1], Uchunk, U)
         U, temps[1] = temps[1], U
     end
