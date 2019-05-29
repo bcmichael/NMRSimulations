@@ -82,7 +82,7 @@ struct BlockCache{T,N,A}
     BlockCache{T,N,A}() where {T,N,A} = new{T,N,A}(Vector{PropagatorCollectionBlock{T,N,A}}())
 end
 
-function add_block!(block_cache::BlockCache{T,N,A}, key::Tuple{Block{T,N}, Int}, steps) where {T,N,A}
+function add_block!(block_cache::BlockCache{T,N,A}, key::Tuple{Block{T,N}, Int}, steps::Int) where {T,N,A}
     rank = key[1].rank
     while rank > length(block_cache.ranks)
         push!(block_cache.ranks, PropagatorCollectionBlock{T,N,A}())
@@ -129,7 +129,7 @@ struct SimCache{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
         Vector{Propagator{A}}(undef,steps), Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}(), BlockCache{T,N,A}())
 end
 
-function build_prop_cache(prop_generator::PropagationGenerator{T,N,A}, dims, parameters) where {T,N,A}
+function build_prop_cache(prop_generator::PropagationGenerator{T,N,A}, dims, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     period_steps = parameters.period_steps
 
     prop_cache = SimCache{T,N,A}(period_steps)
@@ -143,7 +143,9 @@ function build_prop_cache(prop_generator::PropagationGenerator{T,N,A}, dims, par
     return prop_cache
 end
 
-function find_pulses!(prop_cache, prop_generator::PropagationGenerator, parameters)
+function find_pulses!(prop_cache::SimCache{T,N,A}, prop_generator::PropagationGenerator{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     for dim in prop_generator.loops
         for chunk in dim.chunks
             find_pulses!(prop_cache, chunk.current, parameters)
@@ -154,7 +156,9 @@ function find_pulses!(prop_cache, prop_generator::PropagationGenerator, paramete
     return prop_cache
 end
 
-function find_pulses!(prop_cache, props::SpecifiedPropagators, parameters) where {T,N}
+function find_pulses!(prop_cache::SimCache{T,N,A}, props::SpecifiedPropagators{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     for index in eachindex(props)
         if isassigned(props.elements, index)
             element, start = props.elements[index]
@@ -164,7 +168,7 @@ function find_pulses!(prop_cache, props::SpecifiedPropagators, parameters) where
     return prop_cache
 end
 
-function find_pulses!(prop_cache, block::Block, start, parameters)
+function find_pulses!(prop_cache::SimCache{T,N,A}, block::Block{T,N}, start::Int, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     period_steps = parameters.period_steps
     block_cache = prop_cache.blocks
 
@@ -189,7 +193,7 @@ function find_pulses!(prop_cache, block::Block, start, parameters)
     return step_total
 end
 
-function find_pulses!(prop_cache, pulse::Pulse, start, parameters)
+function find_pulses!(prop_cache::SimCache{T,N,A}, pulse::Pulse{T,N}, start::Int, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     pulse_cache = prop_cache.pulses
@@ -209,7 +213,7 @@ function find_pulses!(prop_cache, pulse::Pulse, start, parameters)
     return steps
 end
 
-function allocate_propagators!(block_cache::BlockCache, parameters)
+function allocate_propagators!(block_cache::BlockCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for collection in block_cache.ranks
         for key in keys(collection.steps)
             collection.propagators[key] = similar(parameters.temps[1])
@@ -217,7 +221,7 @@ function allocate_propagators!(block_cache::BlockCache, parameters)
     end
 end
 
-function allocate_propagators!(pulse_cache::PulseCache, parameters)
+function allocate_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for rf_cache in values(pulse_cache)
         allocate_combinations!(rf_cache, parameters)
         for (timing, timing_cache) in rf_cache.timings
@@ -229,7 +233,7 @@ function allocate_propagators!(pulse_cache::PulseCache, parameters)
     end
 end
 
-function allocate_combinations!(rf_cache::PropagatorCollectionRF, parameters)
+function allocate_combinations!(rf_cache::PropagatorCollectionRF{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
 
@@ -243,8 +247,8 @@ function allocate_combinations!(rf_cache::PropagatorCollectionRF, parameters)
     end
 end
 
-function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{<:Hamiltonian{<:AbstractArray{Complex{T}}}},
-        parameters) where {T}
+function build_combined_propagators!(prop_cache::SimCache{T,N,A}, Hinternal::SphericalTensor{Hamiltonian{A}},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
 
     period_steps = parameters.period_steps
     angles = parameters.angles
@@ -263,12 +267,17 @@ function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{<:Ha
     return prop_cache
 end
 
-function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{A}}, parameters, temps) where {A}
+function step_propagators!(propagators::Vector{Propagator{A}}, rf::NTuple{N,T}, Hrotated::Vector{Hamiltonian{A}},
+        parameters::SimulationParameters{M,T,A}, temps::Vector{<:Hamiltonian{Ar}}) where {M,T,N,A,Ar<:AbstractArray{T}}
+
+    wrapper = array_wrapper_type(A)
+    wrapper == array_wrapper_type(Ar) || throw(TypeError("Temporary arrays have incorrect array type"))
+
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyz = parameters.xyz
 
-    Hrf = array_wrapper_type(A)(pulse_H(rf,xyz))
+    Hrf = wrapper(pulse_H(rf,xyz))
     H = similar(temps[1])
     for n = 1:period_steps
         H = real_add!(H, Hrotated[n], Hrf)
@@ -281,10 +290,12 @@ end
     expm_cheby!(U, H, dt, temps)
 
 Modify 'U' to hold a propagator generated from a Hamiltonian ('H') and a time
-interval ('dt') using a Chebyshev expansion. Expects 'temps' to be an indexable
-collection of two arrays similar to the contents of 'H'.
+interval ('dt') using a Chebyshev expansion. The contents of 'temps' and 'H'
+will be modified.
 """
-function expm_cheby!(U, H::Hamiltonian{<:AbstractArray{T}}, dt, temps) where {T}
+function expm_cheby!(U::Propagator{Ac}, H::Hamiltonian{Ar}, dt::Real, temps::Vector{Hamiltonian{Ar}}) where {T,N,Ac<:AbstractArray{Complex{T},N},Ar<:AbstractArray{T,N}}
+    array_wrapper_type(Ac) == array_wrapper_type(Ar) || throw(TypeError("Array types must match"))
+
     nmax = 25
     thresh = T(1E-10)
     bound = eig_max_bound(H.data)
@@ -344,7 +355,9 @@ function eig_max_bound(A::AbstractArray{T}) where T
     return out
 end
 
-function combine_propagators!(rf, step_propagators, parameters)
+function combine_propagators!(rf::PropagatorCollectionRF{T,N,A}, step_propagators::Vector{Propagator{A}},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     γ_steps = parameters.γ_steps
 
     for (combination, combinations) in rf.combinations
@@ -353,7 +366,9 @@ function combine_propagators!(rf, step_propagators, parameters)
     return rf
 end
 
-function combine_propagators(combinations, propagators, combination, parameters)
+function combine_propagators(combinations::Vector{Propagator{A}}, propagators::Vector{Propagator{A}},
+        combination::NTuple{2,Int}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     period_steps = parameters.period_steps
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
@@ -395,7 +410,7 @@ function combine_propagators(combinations, propagators, combination, parameters)
     return combinations
 end
 
-function build_pulse_props!(pulse_cache, parameters)
+function build_pulse_props!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for rf in values(pulse_cache)
         for (timing, timing_cache) in rf.timings
             timing_cache.unphased[1] = build_propagator!(timing_cache.unphased[1], rf, timing, parameters)
@@ -405,7 +420,9 @@ function build_pulse_props!(pulse_cache, parameters)
     return pulse_cache
 end
 
-function build_propagator!(U, rf, timing, parameters)
+function build_propagator!(U::Propagator{A}, rf::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     nγ = parameters.nγ
     γ_steps = parameters.γ_steps
     temp = parameters.temps[1]
@@ -450,7 +467,7 @@ function build_propagator!(U, rf, timing, parameters)
     return U
 end
 
-function generate_phased_propagators!(pulse_cache, parameters)
+function generate_phased_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for rf in values(pulse_cache)
         for timing in values(rf.timings)
             unphased = timing.unphased[1]
@@ -466,7 +483,7 @@ function generate_phased_propagators!(pulse_cache, parameters)
     return pulse_cache
 end
 
-function build_block_props!(prop_cache, parameters)
+function build_block_props!(prop_cache::SimCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for collection in prop_cache.blocks.ranks
         for key in keys(collection.steps)
             build_block_prop!(prop_cache, key, parameters)
@@ -475,7 +492,9 @@ function build_block_props!(prop_cache, parameters)
     return prop_cache
 end
 
-function build_block_prop!(prop_cache, key, parameters)
+function build_block_prop!(prop_cache::SimCache{T,N,A}, key::Tuple{Block{T,N}, Int},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     U, _ = prop_cache.blocks[key]
     block, start = key
     step_total = 0
@@ -488,7 +507,9 @@ function build_block_prop!(prop_cache, key, parameters)
     return prop_cache
 end
 
-function build_nonrepeat_block!(U, block, start, prop_cache, parameters)
+function build_nonrepeat_block!(U::Propagator{A}, block::Block{T,N}, start::Int, prop_cache::SimCache{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     Uelement, step_total = fetch_propagator(block.pulses[1], start, prop_cache, parameters)
     copyto!(U, Uelement)
     for element in block.pulses[2:end]
@@ -500,7 +521,9 @@ function build_nonrepeat_block!(U, block, start, prop_cache, parameters)
     return U
 end
 
-function build_repeat_block!(U, block, start, prop_cache, parameters)
+function build_repeat_block!(U::Propagator{A}, block::Block{T,N}, start::Int, prop_cache::SimCache{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     single_repeat = Block(block.pulses, 1)
     Uelement, step_total = fetch_propagator(single_repeat, start, prop_cache, parameters)
     copyto!(U, Uelement)
@@ -519,7 +542,9 @@ end
 Fetch the propagator corresponding to a given 'pulse' and 'start' step from
 'prop_cache'. Return the propagator and the number of steps used.
 """
-function fetch_propagator(pulse::Pulse, start, prop_cache::SimCache, parameters)
+function fetch_propagator(pulse::Pulse{T,N}, start::Int, prop_cache::SimCache{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
@@ -535,7 +560,9 @@ end
 Fetch the propagator corresponding to a given 'block' and 'start' step from
 'prop_cache'. Return the propagator and the number of steps used.
 """
-function fetch_propagator(block::Block, start, prop_cache::SimCache, parameters)
+function fetch_propagator(block::Block{T,N}, start::Int, prop_cache::SimCache{T,N,A},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     period_steps = parameters.period_steps
 
     start_period = mod1(start, period_steps)
@@ -543,7 +570,9 @@ function fetch_propagator(block::Block, start, prop_cache::SimCache, parameters)
     return U, steps
 end
 
-function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration)
+function γiterate_pulse_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A},
+        γ_iteration::Int) where {M,T,N,A}
+
     γ_steps = parameters.γ_steps
 
     for rf in values(pulse_cache)
@@ -562,7 +591,9 @@ function γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration)
     return pulse_cache
 end
 
-function γiterate_propagator!(U, rf, timing, parameters, γ_iteration)
+function γiterate_propagator!(U::Propagator{A}, rf::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int},
+        parameters::SimulationParameters{M,T,A}, γ_iteration::Int) where {M,T,N,A}
+
     γ_steps = parameters.γ_steps
     nγ = parameters.nγ
     temp = parameters.temps[1]
