@@ -1,5 +1,6 @@
 import SpecialFunctions: besselj0, besselj1, besselj
 import Base: haskey, getindex, setindex!
+import LinearAlgebra: BLAS.BlasReal
 
 """
     PropagatorCollectionTiming
@@ -13,7 +14,7 @@ rotating the 0 phase propagator for the full pulse, because these rotations use
 the Z operator for each channel which the secular internal spin hamiltonian must
 commute with.
 """
-struct PropagatorCollectionTiming{T<:AbstractFloat,N,A<:AbstractArray}
+struct PropagatorCollectionTiming{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     phases::Set{NTuple{N,T}}
     unphased::Vector{Propagator{A}}
     phased::Dict{NTuple{N,T}, Propagator{A}}
@@ -33,7 +34,7 @@ keys of 'combinations' are similar to the keys of 'timings' but modulo γ_steps.
 construct the propagators for all time periods which satisfy this
 relationship.
 """
-struct PropagatorCollectionRF{T<:AbstractFloat,N,A<:AbstractArray}
+struct PropagatorCollectionRF{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     combinations::Dict{NTuple{2,Int}, Vector{Propagator{A}}}
     timings::Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}
 
@@ -60,7 +61,7 @@ key, while 'propagators' is a Dict storing the propagator for each key. The keys
 are Blocks and the step they start on. This combination fully specifies which
 propagator to construct.
 """
-struct PropagatorCollectionBlock{T<:AbstractFloat,N,A<:AbstractArray}
+struct PropagatorCollectionBlock{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     steps::Dict{Tuple{Block{T,N}, Int}, Int}
     propagators::Dict{Tuple{Block{T,N}, Int}, Propagator{A}}
 
@@ -118,7 +119,7 @@ function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{A}, key::Tup
     block_cache.ranks[rank].propagators[key] = prop
 end
 
-struct SimCache{T,N,A}
+struct SimCache{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     step_hamiltonians::Vector{Hamiltonian{A}}
     step_propagators::Vector{Propagator{A}}
     pulses::PulseCache{T,N,A}
@@ -128,7 +129,7 @@ struct SimCache{T,N,A}
         Vector{Propagator{A}}(undef,steps), Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}(), BlockCache{T,N,A}())
 end
 
-function build_prop_cache(prop_generator::PropagationGenerator{A,T,N}, dims, parameters) where {A,T,N}
+function build_prop_cache(prop_generator::PropagationGenerator{T,N,A}, dims, parameters) where {T,N,A}
     period_steps = parameters.period_steps
 
     prop_cache = SimCache{T,N,A}(period_steps)

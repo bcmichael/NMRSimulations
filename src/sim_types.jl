@@ -1,4 +1,5 @@
 import Base: +, *, convert, hash, isequal
+import LinearAlgebra: BLAS.BlasReal
 
 struct SphericalTensor{T}
     s00::T
@@ -221,7 +222,7 @@ struct CPUMultiProcess <: CPUMode end
 struct GPUBatchedMode <: GPUMode end
 struct GPUSingleMode <: GPUMode end
 
-struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray}
+struct SimulationParameters{M<:CalculationMode,T<:BlasReal,A<:AbstractArray{Complex{T}}}
     period_steps::Int
     step_size::T
     nγ::Int

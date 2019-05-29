@@ -1,4 +1,5 @@
 import Base: length, size, setindex!, iterate, eachindex, getindex
+import LinearAlgebra: BLAS.BlasReal
 
 """
     ElementSpecifier
@@ -15,7 +16,7 @@ const ElementSpecifier{T,N} = Tuple{Union{Pulse{T,N},Block{T,N}},Int} where {T,N
 A SpecifiedPropagators object holds an array of ElementSpecifier tuples
 specifying a collection of Propagators and a corresponding array of propagators.
 """
-struct SpecifiedPropagators{T<:AbstractFloat,N,A<:AbstractArray,S}
+struct SpecifiedPropagators{T<:BlasReal,N,A<:AbstractArray{Complex{T}},S}
     elements::Array{ElementSpecifier{T,N},S}
     propagators::Array{Propagator{A},S}
 
@@ -49,12 +50,12 @@ starting step. The Propagators in 'current' will be initialized to match their
 specified elements but will be modified by multiplication with the
 'incrementors' over the course of iteration through the detection loop.
 """
-struct PropagationChunk{T<:AbstractFloat,N,A<:AbstractArray}
+struct PropagationChunk{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     current::SpecifiedPropagators{T,N,A,1}
     incrementors::SpecifiedPropagators{T,N,A,2}
 end
 
-struct PropagationDimension{T<:AbstractFloat,N,A<:AbstractArray}
+struct PropagationDimension{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
     chunks::Array{PropagationChunk{T,N,A},2}
     propagators::Array{Propagator{A},2}
     start_cycle::Int
@@ -67,7 +68,7 @@ struct PropagationDimension{T<:AbstractFloat,N,A<:AbstractArray}
     end
 end
 
-struct PropagationGenerator{T<:AbstractFloat,N,A<:AbstractArray,D}
+struct PropagationGenerator{T<:BlasReal,N,A<:AbstractArray{Complex{T}},D}
     loops::NTuple{D,PropagationDimension{T,N,A}}
     final::SpecifiedPropagators{T,N,A,1}
     size::NTuple{D,Int}
