@@ -1,58 +1,58 @@
-import Base: length, iterate
+import Base: length, size, setindex!, iterate, eachindex, getindex
 
 """
-    SeqElement
+    ElementSpecifier
 
-A SeqElement is a tuple containing either a Pulse or a Block and the step that
-it starts at. This is all the information needed to generate the actual
+An ElementSpecifier is a tuple containing either a Pulse or a Block and the step
+that it starts at. This is all the information needed to generate the actual
 propagator for this pulse sequence element.
 """
-const SeqElement{T,N} = Tuple{Union{Pulse{T,N},Block{T,N}},Int} where {T,N}
+const ElementSpecifier{T,N} = Tuple{Union{Pulse{T,N},Block{T,N}},Int} where {T,N}
+
+"""
+    SpecifiedPropagators
+
+A SpecifiedPropagators object holds an array of ElementSpecifier tuples
+specifying a collection of Propagators and a corresponding array of propagators.
+"""
+struct SpecifiedPropagators{A<:AbstractArray,T<:AbstractFloat,N,S}
+    elements::Array{ElementSpecifier{T,N},S}
+    propagators::Array{Propagator{T,A},S}
+
+    SpecifiedPropagators{A,T,N}(::UndefInitializer, sz::Vararg{Int,S}) where {A,T,N,S} = new{A,T,N,S}(
+        Array{ElementSpecifier{T,N},S}(undef,sz),
+        Array{Propagator{T,A},S}(undef, sz))
+end
+
+length(a::SpecifiedPropagators) = length(a.elements)
+size(a::SpecifiedPropagators) = size(a.elements)
+size(a::SpecifiedPropagators, dim) = size(a.elements, dim)
+setindex!(a::SpecifiedPropagators{A,T,N}, v::ElementSpecifier{T,N}, i::Vararg{Int}) where {A,T,N} = setindex!(a.elements, v, i...)
+setindex!(a::SpecifiedPropagators{A,T,N}, v::Propagator{T,A}, i::Vararg{Int}) where {A,T,N} = setindex!(a.propagators, v, i...)
+getindex(a::SpecifiedPropagators{A,T,N,S}, i::Vararg{Int,S}) where {A,T,N,S} = getindex(a.propagators, i...)
+eachindex(a::SpecifiedPropagators) = eachindex(a.elements)
 
 """
     PropagationChunk
 
 A PropagationChunk corresponds to a chunk of a pulse sequence consisting of a
-looped element and the non-looped elements that precede it. The presence of
-looped elements in previous chunks means that the chunk can have multiple
-different starting steps that occur cyclically over different iterations of the
-pulse sequence detection loop.
+looped element and the non-looped elements that precede it. A PropagationChunk
+is specific to a particular starting step arizing from earlier dimensions. The
+presence of looped elements in previous chunks in the same dimension means that
+the chunk can have multiple different starting steps that occur cyclically over
+different iterations of the pulse sequence detection loop.
 
 The propagator corresponding to the chunk for each iteration can be generated
 using the chunk propagator for the first instance of each starting step as well
 as a series of propagators to increment them for subsequent instances of that
-starting step. 'initial_elements' and 'incrementor_elements' hold SeqElement
-tuples that correspond to these propagators, while 'current' and 'incrementors'
-hold the actual propagators. 'current' will intially hold propagators matching
-'initial_elements', but will be altered by multiplication with the incrementors
-over the course of iteration through the detection loop.
+starting step. The Propagators in 'current' will be initialized to match their
+specified elements but will be modified by multiplication with the
+'incrementors' over the course of iteration through the detection loop.
 """
 struct PropagationChunk{A<:AbstractArray,T<:AbstractFloat,N}
-    initial_elements::Vector{SeqElement{T,N}}
-    incrementor_elements::Array{SeqElement{T,N},2}
-    current::Vector{Propagator{T,A}}
-    incrementors::Array{Propagator{T,A},2}
-
-    function PropagationChunk{A}(initial_elements::Vector{SeqElement{T,N}},
-        incrementor_elements::Array{SeqElement{T,N},2}) where {A<:AbstractArray,T<:AbstractFloat,N}
-
-        current = Vector{Propagator{T,A}}(undef, length(initial_elements))
-        incrementors = Array{Propagator{T,A},2}(undef, size(incrementor_elements))
-        new{A,T,N}(initial_elements, incrementor_elements, current, incrementors)
-    end
+    current::SpecifiedPropagators{A,T,N,1}
+    incrementors::SpecifiedPropagators{A,T,N,2}
 end
-
-struct PropagationFinal{A<:AbstractArray,T<:AbstractFloat,N}
-    elements::Vector{SeqElement{T,N}}
-    propagators::Vector{Propagator{T,A}}
-
-    PropagationFinal{A}(elements::Vector{SeqElement{T,N}}) where {A,T,N} = new{A,T,N}(elements,
-        Vector{Propagator{T,A}}(undef, length(elements)))
-
-    PropagationFinal{A,T,N}() where {A,T,N} = new{A,T,N}(Vector{SeqElement{T,N}}(), Vector{Propagator{T,A}}())
-end
-
-length(a::PropagationFinal) = length(a.elements)
 
 struct PropagationDimension{A<:AbstractArray,T<:AbstractFloat,N}
     chunks::Array{PropagationChunk{A,T,N},2}
@@ -69,7 +69,7 @@ end
 
 struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N,D}
     loops::NTuple{D,PropagationDimension{A,T,N}}
-    final::PropagationFinal{A,T,N}
+    final::SpecifiedPropagators{A,T,N,1}
     size::NTuple{D,Int}
     temps::Vector{Propagator{T,A}} # will be the same as parameters.temps
 end
@@ -94,7 +94,7 @@ function iterate(G::PropagationGenerator{A,T,N,D}, state=1) where {A,T,N,D}
     end
     if length(G.final)>0
         start_index = Int(end_index%1*length(G.final))
-        Uchunk = G.final.propagators[start_index]
+        Uchunk = G.final[start_index]
         mul!(temp, Uchunk, U)
         U, temp = temp, U
     end
@@ -134,7 +134,7 @@ function build_generator(sequence::Sequence{T,N,D}, parameters::SimulationParame
     if sequence.dimensions[end].elements[end] < length(sequence.pulses)
         last_chunk = build_nonlooped(sequence, nonloop_steps, start_cycle, parameters, A)
     else
-        last_chunk = PropagationFinal{A,T,N}()
+        last_chunk = SpecifiedPropagators{A,T,N}(undef, 0)
     end
     prop_generator = PropagationGenerator(Tuple(dim_loops), last_chunk, Tuple(d.size for d in sequence.dimensions), parameters.temps)
     return prop_generator
@@ -197,17 +197,19 @@ function build_looped(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_st
 
     old_cycle = (loop_steps == 0) ? 1 : div(lcm(loop_steps, period_steps), loop_steps)
 
-    initial, nonloop_steps = build_looped_initials(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters)
-    incrementors, loop_steps = build_incrementors(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters)
+    initial, nonloop_steps = build_looped_initials(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters, A)
+    incrementors, loop_steps = build_incrementors(sequence, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters, A)
 
-    chunk = PropagationChunk{A}(initial, incrementors)
+    chunk = PropagationChunk(initial, incrementors)
     return chunk, loop_steps, nonloop_steps
 end
 
-function build_looped_initials(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
+function build_looped_initials(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters,
+    ::Type{A}) where {T,N,A}
+
     loop_element = sequence.pulses[sequence.dimensions[dim].elements[loop]]
     nonloop_element, steps = build_before_loop(sequence, dim, loop, parameters)
-    elements = Vector{SeqElement{T,N}}(undef, old_cycle)
+    elements = SpecifiedPropagators{A,T,N}(undef, old_cycle)
 
     start = nonloop_steps
     if nonloop_element != nothing
@@ -227,7 +229,9 @@ function build_looped_initials(sequence::Sequence{T,N}, dim, loop, loop_steps, n
     return elements, steps+nonloop_steps
 end
 
-function build_incrementors(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters) where {T,N}
+function build_incrementors(sequence::Sequence{T,N}, dim, loop, loop_steps, nonloop_steps, old_cycle, parameters,
+    ::Type{A}) where {T,N,A}
+
     period_steps = parameters.period_steps
     step_size = parameters.step_size
 
@@ -238,7 +242,7 @@ function build_incrementors(sequence::Sequence{T,N}, dim, loop, loop_steps, nonl
     incrementor_steps = steps*old_cycle
     incrementor_cycle = div(lcm(incrementor_steps, period_steps), steps)
 
-    elements = Array{SeqElement{T,N},2}(undef, old_cycle, incrementor_cycle)
+    elements = SpecifiedPropagators{A,T,N}(undef, old_cycle, incrementor_cycle)
     incrementor_block = Block([loop_element], old_cycle)
     start = nonloop_steps
     for n = 1:old_cycle
@@ -268,7 +272,7 @@ end
 function build_nonlooped(sequence::Sequence{T,N}, nonloop_steps, start_cycle, parameters, ::Type{A}) where {T,N,A}
     period_steps = parameters.period_steps
 
-    elements = Vector{SeqElement{T,N}}(undef, start_cycle)
+    elements = SpecifiedPropagators{A,T,N}(undef, start_cycle)
 
     nonloop_element = build_after_loops(sequence)
     cycle_steps = Int(period_steps/start_cycle)
@@ -278,8 +282,7 @@ function build_nonlooped(sequence::Sequence{T,N}, nonloop_steps, start_cycle, pa
         start += cycle_steps
     end
 
-    chunk = PropagationFinal{A}(elements)
-    return chunk
+    return elements
 end
 
 """
@@ -290,31 +293,33 @@ Fill in the Propagators in 'prop_generator'.
 function fill_generator!(prop_generator, prop_cache, parameters)
     for dim in prop_generator.loops
         for chunk in dim.chunks
-            fill_chunk_copy!(chunk.current, chunk.initial_elements, prop_cache, parameters)
-            fill_chunk!(chunk.incrementors, chunk.incrementor_elements, prop_cache, parameters)
+            fill_propagators_copy!(chunk.current, prop_cache, parameters)
+            fill_propagators!(chunk.incrementors, prop_cache, parameters)
         end
         materialize_dimension(dim, parameters)
     end
-    fill_chunk!(prop_generator.final.propagators, prop_generator.final.elements, prop_cache, parameters)
+    fill_propagators!(prop_generator.final, prop_cache, parameters)
     return prop_generator
 end
 
-function fill_chunk_copy!(props, elements, prop_cache, parameters)
-    for index in eachindex(elements)
-        if isassigned(elements, index)
-            U, _ = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters)
+function fill_propagators_copy!(props::SpecifiedPropagators, prop_cache, parameters)
+    for index in eachindex(props)
+        if isassigned(props.elements, index)
+            element, start = props.elements[index]
+            U,_ = fetch_propagator(element, start, prop_cache, parameters)
             copyto!(props[index], U)
         else
-            fill_diag!(props[index], 1)
+            props[index] = fill_diag!(similar(parameters.temps[1]), 1)
         end
     end
     return props
 end
 
-function fill_chunk!(props, elements, prop_cache, parameters)
-    for index in eachindex(elements)
-        if isassigned(elements, index)
-            props[index],_ = fetch_propagator(elements[index][1], elements[index][2], prop_cache, parameters)
+function fill_propagators!(props::SpecifiedPropagators, prop_cache, parameters)
+    for index in eachindex(props)
+        if isassigned(props.elements, index)
+            element, start = props.elements[index]
+            props[index],_ = fetch_propagator(element, start, prop_cache, parameters)
         else
             props[index] = fill_diag!(similar(parameters.temps[1]), 1)
         end
