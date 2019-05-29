@@ -51,7 +51,7 @@ function propagate!(spec::CuArray, ρ0, detector, prop_generator)
         detect!(spec, U, ρ0, detector, detector.occupied_cols, position, prop_generator.temps[1])
     end
 
-    return spec, Uloop
+    return spec
 end
 
 function detect!(spec::CuArray, Uloop::HilbertOperator{T1,<:CuArray{T}}, ρ0::CuSparseMatrixCSC,
