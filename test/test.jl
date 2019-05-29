@@ -107,7 +107,7 @@ include("examples.jl")
 
     @testset "HilbertOperator" begin
         @testset "Propagator" begin
-            @test_throws ErrorException Propagator(rand(4,4,1))
+            @test_throws MethodError Propagator(rand(4,4,1))
             @test_throws MethodError Propagator(rand(Char,4,4,1))
             @test Propagator(rand(Complex{Float64},4,4,1)) isa Propagator
         end

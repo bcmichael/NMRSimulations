@@ -1,24 +1,15 @@
-import LinearAlgebra: axpy!, BLAS.gemm!, BLAS.BlasFloat
+import LinearAlgebra: axpy!, BLAS.gemm!, BLAS.BlasFloat, BLAS.BlasComplex
 import Base: copy, copyto!, similar
 
-abstract type HilbertOperator{T<:AbstractFloat,A<:AbstractArray} end
+abstract type HilbertOperator{A<:AbstractArray} end
 
-struct Propagator{T<:AbstractFloat,A<:AbstractArray} <: HilbertOperator{T,A}
-    data::A
-
-    function Propagator{T,A}(x) where{T<:AbstractFloat,A<:AbstractArray}
-        get_number_type(x)<:Complex || error("Propagator must be complex")
-        new{T,A}(x)
-    end
-end
-
-Propagator(x::A) where {A} = Propagator{get_precision(x),A}(x)
-
-struct Hamiltonian{T<:AbstractFloat,A<:AbstractArray} <: HilbertOperator{T,A}
+struct Propagator{A<:AbstractArray{<:BlasComplex}} <: HilbertOperator{A}
     data::A
 end
 
-Hamiltonian(x::A) where {A} = Hamiltonian{get_precision(x),A}(x)
+struct Hamiltonian{A<:AbstractArray{<:BlasFloat}} <: HilbertOperator{A}
+    data::A
+end
 
 Hamiltonian(s::SphericalTensor{A}) where {T,A<:AbstractArray{T,2}} =
     SphericalTensor([Hamiltonian(getfield(s, name)) for name in fieldnames(SphericalTensor)]...)
@@ -39,15 +30,15 @@ Hamiltonian(x::Vector{<:SphericalTensor{A}}) where {A<:AbstractArray} = Hamilton
 
 operator_iter(A::HilbertOperator) = size(A.data, 1), size(A.data, 3)
 
-function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {T<:BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
+function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where {T<:BlasFloat,
+        H<:HilbertOperator{<:AbstractArray{T,3}}}
 
     gemm_batch!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
 end
 
-function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {T<:BlasFloat,Ar<:AbstractArray{T,2},T1,H<:HilbertOperator{T1,Ar}}
+function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where {T<:BlasFloat,
+        H<:HilbertOperator{<:AbstractArray{T,2}}}
 
     gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
     C
@@ -56,20 +47,6 @@ end
 mul!(C::H, A::H, B::H) where {H<:HilbertOperator} = mul!(C, A, B, 'N', 'N', 1, 0)
 mul!(C::H, A::H, B::H, transA::Char, transB::Char) where {H<:HilbertOperator} = mul!(C, A, B, transA, transB, 1, 0)
 mul!(C::H, A::H, B::H, alpha::Number, beta::Number) where {H<:HilbertOperator} = mul!(C, A, B, 'N', 'N', alpha, beta)
-
-function mul!(C::H, A::SparseMatrixCSC{T,Ti}, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where
-    {Ti,T<:BlasFloat,Ar<:AbstractArray{T,3},T1,H<:HilbertOperator{T1,Ar}}
-
-    transB == 'N' || throw(ArgumentError("'T' and 'C' operations for B are not implemented"))
-    cscmm!(transA, T(alpha), A, dropdims(B.data, dims=3), T(beta), dropdims(C.data, dims=3))
-    C
-end
-
-mul!(C::H, A::SparseMatrixCSC, B::H) where {H<:HilbertOperator} = mul!(C, A, B, 'N', 'N', 1, 0)
-mul!(C::H, A::SparseMatrixCSC, B::H, transA::Char, transB::Char) where {H<:HilbertOperator} =
-    mul!(C, A, B, transA, transB, 1, 0)
-mul!(C::H, A::SparseMatrixCSC, B::H, alpha::Number, beta::Number) where {H<:HilbertOperator} =
-    mul!(C, A, B, 'N', 'N', alpha, beta)
 
 copy(x::A) where {A<:HilbertOperator} = A(copy(x.data))
 

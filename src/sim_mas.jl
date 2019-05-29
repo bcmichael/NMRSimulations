@@ -86,8 +86,8 @@ end
 Run the simulation of a single crystallite over all γ angles and add the results
 to 'spec'.
 """
-function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{Hamiltonian{T,A}}, ρ0, detector,
-        prop_generator, prop_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
+function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{<:Hamiltonian{<:AbstractArray{Complex{T}}}},
+        ρ0, detector, prop_generator, prop_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
 
     nγ = parameters.nγ
 

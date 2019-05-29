@@ -213,9 +213,6 @@ end
 
 include("hilbertoperators.jl")
 
-get_number_type(A::AbstractArray{T,N}) where {T<:Number,N} = T
-get_precision(A::AbstractArray) = real(get_number_type(A))
-
 abstract type CalculationMode end
 abstract type CPUMode <: CalculationMode end
 abstract type GPUMode <: CalculationMode end
@@ -231,7 +228,7 @@ struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray
     γ_steps::Int
     angles::EulerAngles{T}
     xyz::Vector{Array{Complex{T},2}}
-    temps::Vector{Propagator{T,A}}
+    temps::Vector{Propagator{A}}
 
     function SimulationParameters{M,T}(period_steps::Integer,step_size,nγ::Integer,spins) where {M<:CalculationMode,T<:AbstractFloat}
         γ_steps = Int(period_steps/nγ)
@@ -250,7 +247,7 @@ struct SimulationParameters{M<:CalculationMode,T<:AbstractFloat,A<:AbstractArray
         elseif M == GPUSingleMode
             A = CuArray{Complex{T},2}
         end
-        temps = Vector{Propagator{T,A}}()
+        temps = Vector{Propagator{A}}()
 
         new{M,T,A}(period_steps, step_size, nγ, γ_steps, angles, xyz, temps)
     end

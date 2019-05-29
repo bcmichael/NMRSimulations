@@ -17,18 +17,18 @@ specifying a collection of Propagators and a corresponding array of propagators.
 """
 struct SpecifiedPropagators{A<:AbstractArray,T<:AbstractFloat,N,S}
     elements::Array{ElementSpecifier{T,N},S}
-    propagators::Array{Propagator{T,A},S}
+    propagators::Array{Propagator{A},S}
 
     SpecifiedPropagators{A,T,N}(::UndefInitializer, sz::Vararg{Int,S}) where {A,T,N,S} = new{A,T,N,S}(
         Array{ElementSpecifier{T,N},S}(undef,sz),
-        Array{Propagator{T,A},S}(undef, sz))
+        Array{Propagator{A},S}(undef, sz))
 end
 
 length(a::SpecifiedPropagators) = length(a.elements)
 size(a::SpecifiedPropagators) = size(a.elements)
 size(a::SpecifiedPropagators, dim) = size(a.elements, dim)
 setindex!(a::SpecifiedPropagators{A,T,N}, v::ElementSpecifier{T,N}, i::Vararg{Int}) where {A,T,N} = setindex!(a.elements, v, i...)
-setindex!(a::SpecifiedPropagators{A,T,N}, v::Propagator{T,A}, i::Vararg{Int}) where {A,T,N} = setindex!(a.propagators, v, i...)
+setindex!(a::SpecifiedPropagators{A,T,N}, v::Propagator{A}, i::Vararg{Int}) where {A,T,N} = setindex!(a.propagators, v, i...)
 getindex(a::SpecifiedPropagators{A,T,N,S}, i::Vararg{Int,S}) where {A,T,N,S} = getindex(a.propagators, i...)
 eachindex(a::SpecifiedPropagators) = eachindex(a.elements)
 
@@ -56,13 +56,13 @@ end
 
 struct PropagationDimension{A<:AbstractArray,T<:AbstractFloat,N}
     chunks::Array{PropagationChunk{A,T,N},2}
-    propagators::Array{Propagator{T,A},2}
+    propagators::Array{Propagator{A},2}
     start_cycle::Int
     cycle::Int
 
     function PropagationDimension(chunks::Array{PropagationChunk{A,T,N},2}, count, cycle) where {A,T,N}
         start_cycle = size(chunks,2)
-        propagators = Array{Propagator{T,A},2}(undef, (count, start_cycle))
+        propagators = Array{Propagator{A},2}(undef, (count, start_cycle))
         new{A,T,N}(chunks, propagators, start_cycle, cycle)
     end
 end
@@ -71,7 +71,7 @@ struct PropagationGenerator{A<:AbstractArray,T<:AbstractFloat,N,D}
     loops::NTuple{D,PropagationDimension{A,T,N}}
     final::SpecifiedPropagators{A,T,N,1}
     size::NTuple{D,Int}
-    temps::Vector{Propagator{T,A}} # will be the same as parameters.temps
+    temps::Vector{Propagator{A}} # will be the same as parameters.temps
 end
 
 length(G::PropagationGenerator) = reduce(*, G.size)

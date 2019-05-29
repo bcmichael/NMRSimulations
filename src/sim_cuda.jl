@@ -4,7 +4,7 @@ using CUDAdrv
 
 CuArrays.allowscalar(false)
 
-function fill_diag!(A::HilbertOperator{T,Ar}, val) where {T<:AbstractFloat,Ar<:CuArray}
+function fill_diag!(A::HilbertOperator{<:CuArray{T}}, val) where{T}
     x, y = operator_iter(A)
     if x <= 128
         @cuda blocks=y threads=x kernel_fill_diag!(A.data, T(val), 1)
@@ -54,7 +54,7 @@ function propagate!(spec::CuArray, ρ0, detector, prop_generator)
     return spec
 end
 
-function detect!(spec::CuArray, Uloop::HilbertOperator{T1,<:CuArray{T}}, ρ0::CuSparseMatrixCSC,
+function detect!(spec::CuArray, Uloop::HilbertOperator{<:CuArray{T}}, ρ0::CuSparseMatrixCSC,
     detector::CuSparseMatrixCSC, unique_cols, loop,temp) where {T,T1}
 
     x,num = operator_iter(Uloop)

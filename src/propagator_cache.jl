@@ -15,11 +15,11 @@ commute with.
 """
 struct PropagatorCollectionTiming{T<:AbstractFloat,N,A<:AbstractArray}
     phases::Set{NTuple{N,T}}
-    unphased::Vector{Propagator{T,A}}
-    phased::Dict{NTuple{N,T}, Propagator{T,A}}
+    unphased::Vector{Propagator{A}}
+    phased::Dict{NTuple{N,T}, Propagator{A}}
 
-    PropagatorCollectionTiming{T,N,A}() where {T,N,A } = new(Set{NTuple{N,T}}(), Vector{Propagator{T,A}}(),
-        Dict{NTuple{N,T}, Propagator{T,A}}())
+    PropagatorCollectionTiming{T,N,A}() where {T,N,A} = new(Set{NTuple{N,T}}(), Vector{Propagator{A}}(),
+        Dict{NTuple{N,T}, Propagator{A}}())
 end
 
 """
@@ -34,10 +34,10 @@ construct the propagators for all time periods which satisfy this
 relationship.
 """
 struct PropagatorCollectionRF{T<:AbstractFloat,N,A<:AbstractArray}
-    combinations::Dict{NTuple{2,Int}, Vector{Propagator{T,A}}}
+    combinations::Dict{NTuple{2,Int}, Vector{Propagator{A}}}
     timings::Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}
 
-    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Dict{NTuple{2,Int}, Vector{Propagator{T,A}}}(),
+    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Dict{NTuple{2,Int}, Vector{Propagator{A}}}(),
         Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}())
 end
 
@@ -62,10 +62,10 @@ propagator to construct.
 """
 struct PropagatorCollectionBlock{T<:AbstractFloat,N,A<:AbstractArray}
     steps::Dict{Tuple{Block{T,N}, Int}, Int}
-    propagators::Dict{Tuple{Block{T,N}, Int}, Propagator{T,A}}
+    propagators::Dict{Tuple{Block{T,N}, Int}, Propagator{A}}
 
     PropagatorCollectionBlock{T,N,A}() where {T,N,A} = new{T,N,A}(Dict{Tuple{Block{T,N}, Int}, Int}(),
-                                                                  Dict{Tuple{Block{T,N}, Int}, Propagator{T,A}}())
+                                                                  Dict{Tuple{Block{T,N}, Int}, Propagator{A}}())
 end
 
 """
@@ -111,7 +111,7 @@ function getindex(block_cache::BlockCache{T,N}, key::Tuple{Block{T,N}, Int}) whe
     return block_cache.ranks[rank].propagators[key], block_cache.ranks[rank].steps[key]
 end
 
-function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{T,A}, key::Tuple{Block{T,N}, Int}, ) where {T,N,A}
+function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{A}, key::Tuple{Block{T,N}, Int}, ) where {T,N,A}
     rank = key[1].rank
     rank <= length(block_cache.ranks) || throw(KeyError("key $key not initiallized"))
     haskey(block_cache.ranks[rank].steps, key) || throw(KeyError("key $key not initiallized"))
@@ -119,13 +119,13 @@ function setindex!(block_cache::BlockCache{T,N,A}, prop::Propagator{T,A}, key::T
 end
 
 struct SimCache{T,N,A}
-    step_hamiltonians::Vector{Hamiltonian{T,A}}
-    step_propagators::Vector{Propagator{T,A}}
+    step_hamiltonians::Vector{Hamiltonian{A}}
+    step_propagators::Vector{Propagator{A}}
     pulses::PulseCache{T,N,A}
     blocks::BlockCache{T,N,A}
 
-    SimCache{T,N,A}(steps) where {T,N,A} = new{T,N,A}(Vector{Hamiltonian{T,A}}(undef, steps),
-        Vector{Propagator{T,A}}(undef,steps), Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}(), BlockCache{T,N,A}())
+    SimCache{T,N,A}(steps) where {T,N,A} = new{T,N,A}(Vector{Hamiltonian{A}}(undef, steps),
+        Vector{Propagator{A}}(undef,steps), Dict{NTuple{N,T}, PropagatorCollectionRF{T,N,A}}(), BlockCache{T,N,A}())
 end
 
 function build_prop_cache(prop_generator::PropagationGenerator{A,T,N}, dims, parameters) where {A,T,N}
@@ -242,7 +242,9 @@ function allocate_combinations!(rf_cache::PropagatorCollectionRF, parameters)
     end
 end
 
-function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{Hamiltonian{T,A}}, parameters) where {T,A}
+function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{<:Hamiltonian{<:AbstractArray{Complex{T}}}},
+        parameters) where {T}
+
     period_steps = parameters.period_steps
     angles = parameters.angles
     step_propagators = prop_cache.step_propagators
@@ -260,7 +262,7 @@ function build_combined_propagators!(prop_cache, Hinternal::SphericalTensor{Hami
     return prop_cache
 end
 
-function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{T,A}}, parameters, temps) where {T,A}
+function step_propagators!(propagators, rf, Hrotated::Vector{Hamiltonian{A}}, parameters, temps) where {A}
     period_steps = parameters.period_steps
     step_size = parameters.step_size
     xyz = parameters.xyz
@@ -281,7 +283,7 @@ Modify 'U' to hold a propagator generated from a Hamiltonian ('H') and a time
 interval ('dt') using a Chebyshev expansion. Expects 'temps' to be an indexable
 collection of two arrays similar to the contents of 'H'.
 """
-function expm_cheby!(U, H::Hamiltonian{T,A}, dt, temps) where {T,A}
+function expm_cheby!(U, H::Hamiltonian{<:AbstractArray{T}}, dt, temps) where {T}
     nmax = 25
     thresh = T(1E-10)
     bound = eig_max_bound(H.data)
@@ -327,11 +329,12 @@ end
 Calculate an upper bound for the eigenvalues of 'A' based on Gershgorin's
 theorem.
 """
-function eig_max_bound(A)
+function eig_max_bound(A::AbstractArray{T}) where T
+    R = real(T)
     x, y = size(A)
-    out = zero(get_precision(A))
+    out = zero(R)
     @inbounds for j = 1:y
-        current = zero(get_precision(A))
+        current = zero(R)
         for k = 1:x
             current += abs(A[k,j])
         end
