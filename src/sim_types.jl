@@ -1,4 +1,4 @@
-import Base: +, *, convert, haskey, copy, copyto!, similar, hash, isequal, getindex, setindex!
+import Base: +, *, convert, hash, isequal
 
 struct SphericalTensor{T}
     s00::T

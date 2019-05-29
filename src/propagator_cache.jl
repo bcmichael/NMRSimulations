@@ -1,4 +1,5 @@
 import SpecialFunctions: besselj0, besselj1, besselj
+import Base: haskey, getindex, setindex!
 
 """
     PropagatorCollectionTiming

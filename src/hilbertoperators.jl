@@ -1,4 +1,5 @@
 import LinearAlgebra: axpy!, BLAS.gemm!, BLAS.BlasFloat
+import Base: copy, copyto!, similar
 
 abstract type HilbertOperator{T<:AbstractFloat,A<:AbstractArray} end
 
