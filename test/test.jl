@@ -348,7 +348,7 @@ end
 @testset "propagation" begin
     seq = Sequence([Pulse(31.25, 0, 0)], [([1], 1024)])
     par = SimulationParameters(800, 1.25, 100, [Spin(1, 0, 10000, -0.5, 0, 0, 0)])
-    @test build_generator(seq, par) isa PropagationGenerator{Array{Complex{Float64},2},Float64,1,1}
+    @test build_generator(seq, par) isa PropagationGenerator{Float64,1,Array{Complex{Float64},2},1}
     a = build_generator(seq, par)
     @test length(a) == 1024
     @test a.size == (1024,)
@@ -364,7 +364,7 @@ end
         Pulse(5, 0, 0, 100, 90)], 1)
     seq = Sequence([redor_b, d45, Pulse(5,0,0,100,0), d45, Pulse(5,100,0,0,0), redor_b, redor_b], [([1,7], 61)])
     par = SimulationParameters(100, 1, 100, [Spin(1, 2000, 0, 0, 0, 0, 0), Spin(2, 0, 0, 0, 0, 0, 0)])
-    @test build_generator(seq, par) isa PropagationGenerator{Array{Complex{Float64},2},Float64,2,1}
+    @test build_generator(seq, par) isa PropagationGenerator{Float64,2,Array{Complex{Float64},2},1}
     b = build_generator(seq, par)
     @test length(b) == 61
     @test b.size == (61,)
@@ -380,7 +380,7 @@ end
                              Pulse(4, 0, 0)],
                              [([1], 256), ([5], 512)])
     par = SimulationParameters{CPUSingleMode, Float32}(100, 1, 25, [Spin{Float32}(1,0,0,0,0,0,0),Spin{Float32}(1,10000,0,0,0,0,0)])
-    @test build_generator(seq, par) isa PropagationGenerator{Array{Complex{Float32},2},Float32,1,2}
+    @test build_generator(seq, par) isa PropagationGenerator{Float32,1,Array{Complex{Float32},2},2}
     c = build_generator(seq, par)
     @test length(c) == 256*512
     @test c.size == (256,512)
