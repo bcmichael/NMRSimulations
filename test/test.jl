@@ -405,7 +405,7 @@ end
     end
 end
 
-@testset "sim_mas" begin
+@testset "prop cache" begin
     @testset "threshold" begin
         a=rand(16,16)
         @test threshold(a,1)
@@ -427,6 +427,54 @@ end
                 b=exp(-2*pi*im*a[:,:,1]*1E-6)
                 @test expm_cheby!(c, Hamiltonian(a),1E-6,temps).data≈b atol=1E-4
             end
+        end
+    end
+
+    @testset "SimCache" begin
+        @testset "sidebands" begin
+            seq = Sequence([Pulse(31.25, 0, 0)], [([1], 1024)])
+            par = SimulationParameters(800, 1.25, 100, [Spin(1, 0, 10000, -0.5, 0, 0, 0)])
+            push!(par.temps, Propagator(Array{ComplexF64,2}(undef,(2,2))))
+            gen = build_generator(seq, par)
+            cache = build_prop_cache(gen, (2,2), par)
+            @test cache isa SimCache{Float64, 1, Array{ComplexF64,2}}
+            @test length(cache.pulses) == 1
+            @test haskey(cache.pulses, (0,))
+            rf = cache.pulses[(0,)]
+            @test length(rf.timings) == 32
+            @test length(rf.combinations) == 8
+            for c in values(rf.combinations)
+                length(c) == 200
+            end
+            @test length(cache.blocks.ranks) == 1
+        end
+
+        @testset "redor" begin
+            d45 = Pulse(45, 0, 0, 0, 0)
+            redor_b = Block([d45,
+                Pulse(5, 0, 0, 100, 0),
+                d45,
+                Pulse(5, 0, 0, 100, 90)], 1)
+            seq = Sequence([redor_b, d45, Pulse(5,0,0,100,0), d45, Pulse(5,100,0,0,0), redor_b, redor_b], [([1,7], 61)])
+            par = SimulationParameters(100, 1, 100, [Spin(1, 2000, 0, 0, 0, 0, 0), Spin(2, 0, 0, 0, 0, 0, 0)])
+            push!(par.temps, Propagator(Array{ComplexF64,2}(undef,(4,4))))
+            gen = build_generator(seq, par)
+
+            cache = build_prop_cache(gen, (2,2), par)
+            @test cache isa SimCache{Float64, 2, Array{ComplexF64,2}}
+            @test length(cache.pulses) == 3
+            for rf in values(cache.pulses)
+                @test length(rf.combinations) == 1
+                @test length(rf.combinations[(1,0)]) == 100
+                for t in values(rf.timings)
+                    @test length(t.phases) == 1
+                end
+            end
+            @test length(cache.pulses[(0,0)].timings) == 2
+            @test length(cache.pulses[(0,100)].timings) == 2
+            @test length(cache.pulses[(100,0)].timings) == 1
+            @test (0,90) in cache.pulses[(0,100)].timings[(96,5)].phases
+            @test length(cache.blocks.ranks) == 2
         end
     end
 end
