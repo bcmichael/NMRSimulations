@@ -80,10 +80,17 @@ include("examples.jl")
             @test Block{Float32}(b) isa Block{Float32,n}
             c=Block([a,a])
             d = Block([a,a],2)
+            e = Block([a],2)
             @test hash(b) == hash(c)
+            @test hash(b) == hash(e)
             @test hash(b) != hash(d)
             @test isequal(b, c)
+            @test isequal(b, e)
             @test ! isequal(b, d)
+            @test b.rank == 1
+            @test Block([b]).rank == 1
+            @test Block([b, a]).rank == 2
+            @test Block([b,a], 2).rank == 3
         end
     end
 
