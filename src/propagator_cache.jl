@@ -293,9 +293,7 @@ function find_pulses!(prop_cache::SimCache{T,N,A}, pulse::Pulse{T,N}, start::Int
 
     steps = Int(pulse.t/step_size)
     rf = pulse.γB1
-    # if ! haskey(pulse_cache, rf)
-        add_rf!(pulse_cache, rf)
-    # end
+    add_rf!(pulse_cache, rf)
 
     timing = (mod1(start, period_steps), steps)
     add_timing!(pulse_cache[rf], timing)

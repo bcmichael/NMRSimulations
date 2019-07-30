@@ -130,7 +130,6 @@ function build_generator(sequence::Sequence{T,N,D}, parameters::SimulationParame
         dimension, nonloop_steps, start_cycle = build_dim(sequence, d, nonloop_steps, start_cycle, parameters)
         push!(dim_loops, dimension)
     end
-    loop_steps = Int(period_steps/start_cycle)
 
     if sequence.dimensions[end].elements[end] < length(sequence.pulses)
         last_chunk = build_nonlooped(sequence, nonloop_steps, start_cycle, parameters)

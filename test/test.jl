@@ -290,7 +290,6 @@ end
                 b=tuple(rand(n).*100...)
                 c=channel_XYZ(a[1:n],n,x,y,z)
                 @test pulse_H(b,c) isa Array{Complex{Float64},2}
-                # @test pulse_H(b,c)[2] isa Diagonal{Complex{Float64}}
                 d=pulse_H(b,c)
                 @test size(d)==(2^n,2^n)
                 @test all(((x,y)-> (x==0 && y==0) || (x!=0 && y!=0)).(d,sum(c[1:3:end])+sum(c[2:3:end])))
