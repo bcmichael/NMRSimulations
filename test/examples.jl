@@ -129,7 +129,7 @@ function rfdr_long(M=CPUSingleMode)
     return spec
 end
 
-function rfdr_2d(size, ::Type{T} = Float64) where T
+function rfdr_2d(size, M=CPUSingleMode, ::Type{T} = Float64) where T
     cs_iso = [-11.732, 0.199, 2.154, 2.829, 3.543, 3.637]
     spins = [Spin{T}(1, i*1000, 0, 0, 0, 0, 0) for i in cs_iso[1:3]]
     pos = [3.734 6.733 2.822; 3.522 7.597 1.589; 4.043 6.87 0.351; 4.541 7.765 -0.791; 3.423 8.516 -1.497; 5.34 6.943 -1.789]
@@ -159,7 +159,7 @@ function rfdr_2d(size, ::Type{T} = Float64) where T
                    Pulse(48, 0, 0), Pulse(4, 125, 90), Pulse(48, 0, 0),
                    Pulse(48, 0, 0), Pulse(4, 125, 0), Pulse(48, 0, 0)])
 
-    parameters = SimulationParameters{CPUSingleMode, T}(100, 1, 25, spins)
+    parameters = SimulationParameters{M, T}(100, 1, 25, spins)
     p = sparse(parameters.xyz[1])
     detect = sparse(parameters.xyz[1]+im*parameters.xyz[2])
     crystallites = read_crystallites("test/rep100.cry", T)
