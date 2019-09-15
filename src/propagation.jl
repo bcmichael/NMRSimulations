@@ -292,29 +292,32 @@ function build_nonlooped(sequence::Sequence{T,N}, nonloop_steps::Int, start_cycl
 end
 
 """
-    fill_generator!(prop_generator, prop_cache, parameters)
+    fill_generator!(prop_generator, prop_cache, parameters, 'γ_offset')
 
-Fill in the Propagators in 'prop_generator'.
+Fill in the Propagators in 'prop_generator' based on the sequence starting at a
+step based on the γ angle given by 'γ_offset'.
 """
-function fill_generator!(prop_generator::PropagationGenerator{T,N,A}, prop_cache,
+function fill_generator!(prop_generator::PropagationGenerator{T,N,A}, prop_cache, γ_offset,
         parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
 
     for dim in prop_generator.loops
         for chunk in dim.chunks
-            fill_propagators_copy!(chunk.current, prop_cache, parameters)
-            fill_propagators!(chunk.incrementors, prop_cache, parameters)
+            fill_propagators_copy!(chunk.current, prop_cache, γ_offset, parameters)
+            fill_propagators!(chunk.incrementors, prop_cache, γ_offset, parameters)
         end
         materialize_dimension(dim, parameters)
     end
-    fill_propagators!(prop_generator.final, prop_cache, parameters)
+    fill_propagators!(prop_generator.final, prop_cache, γ_offset, parameters)
     return prop_generator
 end
 
-function fill_propagators_copy!(props::SpecifiedPropagators{T,N,A}, prop_cache, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+function fill_propagators_copy!(props::SpecifiedPropagators{T,N,A}, prop_cache, γ_offset,
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     for index in eachindex(props)
         if isassigned(props.elements, index)
             element, start = props.elements[index]
-            U,_ = fetch_propagator(element, start, prop_cache, parameters)
+            U,_ = fetch_propagator(element, start+γ_offset, prop_cache, parameters)
             copyto!(props[index], U)
         else
             props[index] = fill_diag!(similar(parameters.temps[1]), 1)
@@ -323,11 +326,13 @@ function fill_propagators_copy!(props::SpecifiedPropagators{T,N,A}, prop_cache, 
     return props
 end
 
-function fill_propagators!(props::SpecifiedPropagators{T,N,A}, prop_cache, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+function fill_propagators!(props::SpecifiedPropagators{T,N,A}, prop_cache, γ_offset,
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     for index in eachindex(props)
         if isassigned(props.elements, index)
             element, start = props.elements[index]
-            props[index],_ = fetch_propagator(element, start, prop_cache, parameters)
+            props[index],_ = fetch_propagator(element, start+γ_offset, prop_cache, parameters)
         else
             props[index] = fill_diag!(similar(parameters.temps[1]), 1)
         end
