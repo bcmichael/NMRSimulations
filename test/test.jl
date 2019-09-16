@@ -440,11 +440,7 @@ end
             @test length(cache.pulses) == 1
             @test haskey(cache.pulses, (0,))
             rf = cache.pulses[(0,)]
-            @test length(rf.timings) == 32
-            @test length(rf.combinations) == 8
-            for c in values(rf.combinations)
-                length(c) == 200
-            end
+            @test length(rf.timings) == 800
             @test length(cache.blocks.ranks) == 1
         end
 
@@ -462,16 +458,18 @@ end
             cache = build_prop_cache(gen, (2,2), par)
             @test cache isa SimCache{Float64, 2, Array{ComplexF64,2}}
             @test length(cache.pulses) == 3
-            for rf in values(cache.pulses)
-                @test length(rf.combinations) == 1
-                @test length(rf.combinations[(1,0)]) == 100
-                for t in values(rf.timings)
-                    @test length(t.phases) == 1
-                end
+            for t in values(cache.pulses[(0,0)].timings)
+                @test length(t.phases) == 1
             end
-            @test length(cache.pulses[(0,0)].timings) == 2
-            @test length(cache.pulses[(0,100)].timings) == 2
-            @test length(cache.pulses[(100,0)].timings) == 1
+            for t in values(cache.pulses[(100,0)].timings)
+                @test length(t.phases) == 1
+            end
+            for t in values(cache.pulses[(0,100)].timings)
+                @test length(t.phases) == 2
+            end
+            @test length(cache.pulses[(0,0)].timings) == 100
+            @test length(cache.pulses[(0,100)].timings) == 100
+            @test length(cache.pulses[(100,0)].timings) == 100
             @test (0,90) in cache.pulses[(0,100)].timings[(96,5)].phases
             @test length(cache.blocks.ranks) == 2
         end
@@ -487,6 +485,6 @@ end
 end
 
 @testset "cuda_examples" begin
-    @test rfdr(GPUBatchedMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
-    @test rfdr(GPUSingleMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-5
+    @test rfdr(GPUBatchedMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-4
+    @test rfdr(GPUSingleMode, Float32)[1:5]≈[0.0+0.0im, -0.000304554-9.93079e-9im, -0.00121739-7.93902e-8im, -0.00273603-2.67627e-7im, -0.00485636-6.33332e-7im] atol=1E-4
 end

@@ -31,30 +31,34 @@ A 'PropagatorCollectionRF' contains a cache of propagators that all share the
 same RF powers. 'timings' holds propagators that correspond to a unique time
 period for a pulse. The keys for 'timings' are a tuple holding the starting step
 modulo the rotor period and the length of the pulse in steps.
-
-'combinations' holds combined propagators taht are used to construct the
-propagators in 'timings'. The keys for 'combinations' are a tuple containing the
-starting step and number of steps modulo the number of steps per γ angle. Thus
-multiple entries in 'timings' can correspond to a single entry in
-'combinations'.
 """
 struct PropagatorCollectionRF{T<:BlasReal,N,A<:AbstractArray{Complex{T}}}
-    combinations::Dict{NTuple{2,Int}, Vector{Propagator{A}}}
     timings::Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}
 
-    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Dict{NTuple{2,Int}, Vector{Propagator{A}}}(),
-        Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}())
+    PropagatorCollectionRF{T,N,A}() where {T,N,A } = new(Dict{NTuple{2,Int}, PropagatorCollectionTiming{T,N,A}}())
 end
 
 """
-    add_timing!(collection, timing)
+    add_pulse!(collection, timing, phases, parameters)
 
-Allocate and add a new PropagatorCollectionTiming to 'collection' if the
-'timing' is not already present.
+For each γ angle ensure that a PropagatorCollectionTiming for the given 'timing'
+is present in the 'collection', allocating a new one if one does not already
+exist. Add the 'phases' to each of the PropagatorCollectionTiming's.
 """
-function add_timing!(collection::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int}) where {T,N,A}
-    if ! haskey(collection.timings, timing)
-        collection.timings[timing] = PropagatorCollectionTiming{T,N,A}()
+function add_pulse!(collection::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int}, phases::NTuple{N,T},
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
+    nγ = parameters.nγ
+    γ_steps = parameters.γ_steps
+    period_steps = parameters.period_steps
+
+    for n = 1:nγ
+        start = mod1(timing[1]+n*γ_steps, period_steps)
+        γ_timing = (start, timing[2])
+        if ! haskey(collection.timings, γ_timing)
+            collection.timings[γ_timing] = PropagatorCollectionTiming{T,N,A}()
+        end
+        push!(collection.timings[γ_timing].phases, phases)
     end
 end
 
@@ -109,17 +113,28 @@ struct BlockCache{T,N,A}
 end
 
 """
-    add_block!(block_cache, key, steps)
+    add_block!(block_cache, key, steps, parameters)
 
 Add the block specified by 'key' to the 'block_cache'. The number of 'steps' in
 the block is also stored in the cache.
 """
-function add_block!(block_cache::BlockCache{T,N,A}, key::Tuple{Block{T,N}, Int}, steps::Int) where {T,N,A}
+function add_block!(block_cache::BlockCache{T,N,A}, key::Tuple{Block{T,N}, Int}, steps::Int,
+    parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
+    nγ = parameters.nγ
+    γ_steps = parameters.γ_steps
+    period_steps = parameters.period_steps
+
     rank = key[1].rank
     while rank > length(block_cache.ranks)
         push!(block_cache.ranks, PropagatorCollectionBlock{T,N,A}())
     end
-    block_cache.ranks[rank].steps[key] = steps
+
+    for n = 1:nγ
+        start = mod1(key[2]+n*γ_steps, period_steps)
+        γ_key = (key[1], start)
+        block_cache.ranks[rank].steps[γ_key] = steps
+    end
 end
 
 """
@@ -256,7 +271,9 @@ end
 Add a 'block' with a particular 'start' step and all of its constituent pulses
 to the 'pulse_cache'.
 """
-function find_pulses!(prop_cache::SimCache{T,N,A}, block::Block{T,N}, start::Int, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+function find_pulses!(prop_cache::SimCache{T,N,A}, block::Block{T,N}, start::Int,
+        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
+
     period_steps = parameters.period_steps
     block_cache = prop_cache.blocks
 
@@ -277,7 +294,7 @@ function find_pulses!(prop_cache::SimCache{T,N,A}, block::Block{T,N}, start::Int
             step_total += find_pulses!(prop_cache, single_repeat, start+step_total, parameters)
         end
     end
-    add_block!(block_cache, cache_key, step_total)
+    add_block!(block_cache, cache_key, step_total, parameters)
     return step_total
 end
 
@@ -296,9 +313,7 @@ function find_pulses!(prop_cache::SimCache{T,N,A}, pulse::Pulse{T,N}, start::Int
     add_rf!(pulse_cache, rf)
 
     timing = (mod1(start, period_steps), steps)
-    add_timing!(pulse_cache[rf], timing)
-
-    push!(pulse_cache[rf].timings[timing].phases, pulse.phase)
+    add_pulse!(pulse_cache[rf], timing, pulse.phase, parameters)
     return steps
 end
 
@@ -322,7 +337,6 @@ Allocate a propagator for each pulse and combination in the 'pulse_cache'.
 """
 function allocate_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
     for rf_cache in values(pulse_cache)
-        allocate_combinations!(rf_cache, parameters)
         for (timing, timing_cache) in rf_cache.timings
             push!(timing_cache.unphased, similar(parameters.temps[1]))
             for phase in timing_cache.phases
@@ -333,44 +347,17 @@ function allocate_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::Simul
 end
 
 """
-    allocate_combinations!(rf_cache, parameters)
+    build_propagators!(prop_cache, Hinternal, parameters)
 
-Allocate each of the combination propagators for each unique timing in the
-'rf_cache'.
+Caclulate the actual propagators for each pulse and block in the 'prop_cache'.
+This is accomplished by first rotating the internal spin hamiltonian 'Hinternal'
+to the angle corresponding to each step in the rotor period. For each set of rf
+powers propagators for each step are calculated from these rotated hamiltonians
+and combined to form the combination propagators. The combination propagators
+are used to build the pulse propagators which are in turn used to build the
+Block propagators. The results are stored in the 'prop_cache'.
 """
-function allocate_combinations!(rf_cache::PropagatorCollectionRF{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
-    nγ = parameters.nγ
-    γ_steps = parameters.γ_steps
-
-    unique_timings = Set{Tuple{Int,Int}}()
-    for timing in keys(rf_cache.timings)
-        push!(unique_timings, combination_timing(timing, γ_steps))
-    end
-    for timing in unique_timings
-        num_combinations = timing[2] == 0 ? nγ : 2*nγ
-        rf_cache.combinations[timing] = [similar(parameters.temps[1]) for n=1:num_combinations]
-    end
-end
-
-"""
-    combination_timing(timing, γ_steps)
-
-Get the key to specify a set of combination propagators for a particular pulse
-'timing'.
-"""
-combination_timing(timing, γ_steps) = (mod1(timing[1], γ_steps), mod(timing[2], γ_steps))
-
-"""
-    build_combined_propagators!(prop_cache, Hinternal, parameters)
-
-Caclulate the actual propagators for each of the combination propagators in the
-'prop_cache'. This is accomplished by first rotating the internal spin
-hamiltonian 'Hinternal' to the angle corresponding to each step in the rotor
-period. For each rf power propagators for each step are calculated from these
-rotated hamiltonians and combined to form the combination propagators. The
-results are stored in the 'prop_cache'.
-"""
-function build_combined_propagators!(prop_cache::SimCache{T,N,A}, Hinternal::SphericalTensor{Hamiltonian{A}},
+function build_propagators!(prop_cache::SimCache{T,N,A}, Hinternal::SphericalTensor{Hamiltonian{A}},
         parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
 
     period_steps = parameters.period_steps
@@ -385,8 +372,11 @@ function build_combined_propagators!(prop_cache::SimCache{T,N,A}, Hinternal::Sph
     temps = [Hamiltonian(similar(Hrotated[1].data, T)) for j = 1:2]
     for (γB1, rf_cache) in prop_cache.pulses
         step_propagators!(step_propagators, γB1, Hrotated, parameters, temps)
-        combine_propagators!(rf_cache, step_propagators, parameters)
+        combine_propagators!(step_propagators, parameters)
+        build_pulse_propagators!(rf_cache, step_propagators, parameters)
     end
+    generate_phased_propagators!(prop_cache.pulses, parameters)
+    build_block_props!(prop_cache, parameters)
     return prop_cache
 end
 
@@ -487,176 +477,71 @@ function eig_max_bound(A::AbstractArray{T}) where T
 end
 
 """
-    combine_propagators!(rf_cache, step_propagators, parameters)
+    combine_propagators(step_propagators, parameters)
 
-Generate the combined propagators for each of the timings for a given rf power
-from the propagators for each step in the rotor period ('step_propagators').
-The results are stored in the 'rf_cache'.
+Create the combined propagators by sequentially multiplying the
+'step_propagators'. The results are stored in the same vector as the
+'step_propagators'.
 """
-function combine_propagators!(rf_cache::PropagatorCollectionRF{T,N,A}, step_propagators::Vector{Propagator{A}},
-        parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
-
-    γ_steps = parameters.γ_steps
-
-    for (combination, combinations) in rf_cache.combinations
-        if combination[2] == 0
-            combine_propagators_unsplit!(combinations, step_propagators, combination, parameters)
-        else
-            combine_propagators_split!(combinations, step_propagators, combination, parameters)
-        end
-    end
-    return rf_cache
-end
-
-"""
-    combine_propagators_unsplit!(combinations, step_propagators, combination, parameters)
-
-Generate the combined propagators for a timing that has a length divisible by
-the number of steps per γ angle. A single combination is generated per γ angele
-from the propagators for each step in the rotor period ('step_propagators'). The
-results are stored in 'combinations'.
-"""
-function combine_propagators_unsplit!(combinations::Vector{Propagator{A}}, step_propagators::Vector{Propagator{A}},
-        combination::NTuple{2,Int}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
-
-    nγ = parameters.nγ
-    γ_steps = parameters.γ_steps
+function combine_propagators!(step_propagators::Vector{Propagator{A}}, parameters::SimulationParameters{M,T,A}) where {M,T,A}
     temp = parameters.temps[1]
 
-    for n = 1:nγ
-        U = combinations[n]
-        U, temp = build_combination!(U, temp, (n-1)*γ_steps+combination[1], γ_steps, step_propagators)
-        combinations[n] = U
+    for n = 2:length(step_propagators)
+        mul!(temp, step_propagators[n], step_propagators[n-1])
+        step_propagators[n], temp = temp, step_propagators[n]
     end
     parameters.temps[1] = temp
 end
 
 """
-    combine_propagators_split!(combinations, step_propagators, combination, parameters)
+    build_pulse_propagators!(rf_cache, combined_propagators, parameters)
 
-Generate the combined propagators for a timing that has a length not divisible
-by the number of steps per γ angle. The steps for each γ angle are split between
-two combination propagators. This split ensures that a propagator γ_steps long
-starting from both the beginning or ending of a pulse (used by
-γiterate_propagator!) can easily be generated from two of the combinations.
-
-The combinations are generated from the propagators for each step in the rotor
-period ('step_propagators') and the results are stored in 'combinations'.
+Build a propagator for every timing in the 'rf_cache' from the
+'combined_propagators'. The results are stored in the 'rf_cache'.
 """
-function combine_propagators_split!(combinations::Vector{Propagator{A}}, step_propagators::Vector{Propagator{A}},
-        combination::NTuple{2,Int}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
-
-    nγ = parameters.nγ
-    γ_steps = parameters.γ_steps
-    temp = parameters.temps[1]
-
-    counts = (combination[2], γ_steps-combination[2])
-
-    for n = 1:nγ
-        position1 = (n-1)*γ_steps+combination[1]
-        U1 = combinations[2*n-1]
-        U1, temp = build_combination!(U1, temp, position1, counts[1], step_propagators)
-        combinations[2*n-1] = U1
-
-        position2 = position1+combination[2]
-        U2 = combinations[2*n]
-        U2, temp = build_combination!(U2, temp, position2, counts[2], step_propagators)
-        combinations[2*n] = U2
-    end
-    parameters.temps[1] = temp
-end
-
-"""
-    build_combination!(U, temp, start, count, step_propagators)
-
-Combine a number of propagators specified by 'count' taken from
-'step_propagators' starting at position 'start'. 'U' and 'temp' are modified and
-returned. They may switch names so it is important to actually use the returned
-propagators.
-"""
-function build_combination!(U::Propagator{A}, temp::Propagator{A}, start::Int, count::Int,
-        step_propagators::Vector{Propagator{A}}) where {A}
-
-    count > 0 || throw(ArgumentError("Combination cannot have 0 steps"))
-
-    period_steps = length(step_propagators)
-
-    start_ind = mod1(start, period_steps)
-    copyto!(U, step_propagators[start_ind])
-    for n = start+1:start+count-1
-        position = mod1(n, period_steps)
-        mul!(temp, step_propagators[position], U)
-        U, temp = temp, U
-    end
-    return U, temp
-end
-
-"""
-    build_pulse_props!(pulse_cache, parameters)
-
-Calculate the propagators for each pulse in 'pulse_cache'. First the unphased
-propagators are generated from the combination propagators, and then the phased
-propagators are generated by rotating the unphased propagators. The results are
-stored in the 'pulse_cache'.
-"""
-function build_pulse_props!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
-    for rf in values(pulse_cache)
-        for (timing, timing_cache) in rf.timings
-            timing_cache.unphased[1] = build_propagator!(timing_cache.unphased[1], rf, timing, parameters)
-        end
-    end
-    generate_phased_propagators!(pulse_cache, parameters)
-    return pulse_cache
-end
-
-"""
-    build_propagator!(U, rf_cache, timing, parameters)
-
-Calculate the unphased propagator for a particular 'timing' by combining
-combination propagators stored in 'rf_cache' using 'U' for storage. Return the
-propagator.
-"""
-function build_propagator!(U::Propagator{A}, rf_cache::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int},
+function build_pulse_propagators!(rf_cache::PropagatorCollectionRF{T,N,A}, combined_propagators::Vector{Propagator{A}},
         parameters::SimulationParameters{M,T,A}) where {M,T,N,A}
 
-    nγ = parameters.nγ
-    γ_steps = parameters.γ_steps
+    period_steps = parameters.period_steps
+
+    for (timing, timing_cache) in rf_cache.timings
+        timing_cache.unphased[1] = build_pulse_propagator!(timing_cache.unphased[1], combined_propagators, timing, parameters)
+    end
+end
+
+"""
+    build_pulse_propagator(U, combined_propagators, timing, parameters)
+
+Calculate the unphased propagator for a particular 'timing' from the
+'combined_propagators' using 'U' for storage. Return the propagator.
+"""
+function build_pulse_propagator!(U::Propagator{A}, combined_propagators::Vector{Propagator{A}}, timing::NTuple{2,Int},
+        parameters::SimulationParameters{M,T,A}) where {M,T,A}
+
+    period_steps = length(combined_propagators)
     temp = parameters.temps[1]
 
-    combinations = rf_cache.combinations[combination_timing(timing, γ_steps)]
+    start = timing[1]
+    finish = timing[1]+timing[2]-1
+    cycles, base = divrem(finish, period_steps)
 
-    if mod(timing[2], γ_steps) == 0
-        start = fld1(timing[1], γ_steps)
-        steps = div(timing[2], γ_steps)
-
-        cycles, remain = divrem(steps, nγ)
-        cycle_size = nγ
+    # Ustart,finish = U1,base*(U1,nγ)^cycles*U1,start-1†
+    # if any of these propagators are I (cycles=0, start=1, base=0) skip that multiplication
+    if cycles == 0
+        copyto!(U, combined_propagators[base])
     else
-        start = fld1(timing[1], γ_steps)*2-1
-        steps = div(timing[2], γ_steps)*2+1
-
-        cycles, remain = divrem(steps, 2*nγ)
-        cycle_size = 2*nγ
-    end
-
-    if remain != 0
-        copyto!(U, combinations[mod1(start, cycle_size)])
-        for n = start+1:start+remain-1
-            mul!(temp, combinations[mod1(n, cycle_size)], U)
+        copyto!(U, combined_propagators[end])
+        if cycles > 1
+            U, temp = pow!(similar(U), U, cycles, temp)
+        end
+        if base != 0
+            mul!(temp, combined_propagators[base], U)
             U, temp = temp, U
         end
-    else
-        fill_diag!(U,1)
     end
 
-    if cycles>0
-        remainder = copy(U)
-        for n = start+remain:start+cycle_size-1
-            mul!(temp, combinations[mod1(n, cycle_size)], U)
-            U,temp = temp, U
-        end
-        U, temp = pow!(similar(U), U, cycles, temp)
-        mul!(temp, remainder, U)
+    if start != 1
+        mul!(temp, U, combined_propagators[start-1], 'N', 'C')
         U, temp = temp, U
     end
     parameters.temps[1] = temp
@@ -799,67 +684,4 @@ function fetch_propagator(block::Block{T,N}, start::Int, prop_cache::SimCache{T,
     start_period = mod1(start, period_steps)
     U, steps = prop_cache.blocks[(block,start_period)]
     return U, steps
-end
-
-"""
-    γiterate_pulse_propagators!(pulse_cache, parameters, γ_iteration)
-
-Transform all of the propagators in the 'pulse_cache' to be correct for the next
-γ angle. 'γ_iteration' specifies which γ angle is next.
-"""
-function γiterate_pulse_propagators!(pulse_cache::PulseCache{T,N,A}, parameters::SimulationParameters{M,T,A},
-        γ_iteration::Int) where {M,T,N,A}
-
-    γ_steps = parameters.γ_steps
-
-    for rf in values(pulse_cache)
-        for timing_pair in rf.timings
-            timing, timing_collection = timing_pair
-            if timing[2] <= 2*γ_steps # short pulses are cheaper to generate from combinations than to γiterate
-                iterated_timing = tuple(timing[1]+γ_steps*(γ_iteration-1),timing[2])
-                timing_collection.unphased[1] =
-                    build_propagator!(timing_collection.unphased[1], rf, iterated_timing, parameters)
-            else
-                γiterate_propagator!(timing_collection.unphased[1], rf, timing, parameters, γ_iteration)
-            end
-        end
-    end
-    generate_phased_propagators!(pulse_cache, parameters)
-    return pulse_cache
-end
-
-"""
-    γiterate_pulse_propagators!(U, rf, timing, parameters, γ_iteration)
-
-Transform the propagator 'U' in 'rf' that has the specified 'timing' to be
-correct for the next γ angle. The effective start step of 'U' is shifted forward
-by multiplying it with a propagator γ_steps long starting at the same time. The
-effective end step of 'U' is shifted by multiplying a propagator γ_steps long
-starting after its end with it. 'γ_iteration' specifies which γ angle is next.
-"""
-function γiterate_propagator!(U::Propagator{A}, rf::PropagatorCollectionRF{T,N,A}, timing::NTuple{2,Int},
-        parameters::SimulationParameters{M,T,A}, γ_iteration::Int) where {M,T,N,A}
-
-    γ_steps = parameters.γ_steps
-    nγ = parameters.nγ
-    temp = parameters.temps[1]
-
-    combinations = rf.combinations[combination_timing(timing, γ_steps)]
-
-    if mod(timing[2], γ_steps) == 0
-        start = fld1(timing[1], γ_steps)+γ_iteration-2
-        stop = div(timing[2], γ_steps)+start-1
-
-        mul!(temp, U, combinations[mod1(start,nγ)], 'N', 'C')
-        mul!(U, combinations[mod1(stop+1, nγ)], temp)
-    else
-        start = fld1(timing[1], γ_steps)*2-1+2*(γ_iteration-2)
-        stop = div(timing[2], γ_steps)*2+start
-
-        mul!(temp, U, combinations[mod1(start, 2*nγ)], 'N', 'C')
-        mul!(U, temp, combinations[mod1(start+1, 2*nγ)], 'N', 'C')
-        mul!(temp, combinations[mod1(stop+1,2*nγ)], U)
-        mul!(U, combinations[mod1(stop+2,2*nγ)], temp)
-    end
-    return U
 end

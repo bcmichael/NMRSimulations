@@ -90,17 +90,12 @@ function γ_average!(spec, sequence::Sequence{T,N}, Hinternal::SphericalTensor{<
         ρ0, detector, prop_generator, prop_cache, parameters::SimulationParameters{M,T}) where {T,N,A,M}
 
     nγ = parameters.nγ
+    γ_steps = parameters.γ_steps
 
-    build_combined_propagators!(prop_cache, Hinternal, parameters)
-    build_pulse_props!(prop_cache.pulses, parameters)
+    build_propagators!(prop_cache, Hinternal, parameters)
 
     for n = 1:nγ
-        if n != 1
-            γiterate_pulse_propagators!(prop_cache.pulses, parameters, n)
-        end
-
-        build_block_props!(prop_cache, parameters)
-        fill_generator!(prop_generator, prop_cache, parameters)
+        fill_generator!(prop_generator, prop_cache, (n-1)*γ_steps, parameters)
         propagate!(spec, ρ0, detector, prop_generator)
     end
     return spec
