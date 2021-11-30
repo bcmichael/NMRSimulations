@@ -1,8 +1,6 @@
-using CUDAnative
-using CuArrays
-using CUDAdrv
+using CUDA
 
-CuArrays.allowscalar(false)
+CUDA.allowscalar(false)
 
 function fill_diag!(A::HilbertOperator{<:CuArray{T}}, val) where{T}
     x, y = operator_iter(A)
@@ -32,10 +30,10 @@ end
 struct CuSparseMatrixCSC{Tv,Ti<:Integer}
     m::Int                  # Number of rows
     n::Int                  # Number of columns
-    colptr::CuArray{Ti,1}      # Column i is in colptr[i]:(colptr[i+1]-1)
-    rowval::CuArray{Ti,1}      # Row indices of stored values
-    nzval::CuArray{Tv,1}     # Stored values, typically nonzeros
-    occupied_cols::CuArray{Ti,1}  #list of columns with non zero stored values
+    colptr::CuArray{Ti,1,CUDA.Mem.DeviceBuffer}      # Column i is in colptr[i]:(colptr[i+1]-1)
+    rowval::CuArray{Ti,1,CUDA.Mem.DeviceBuffer}      # Row indices of stored values
+    nzval::CuArray{Tv,1,CUDA.Mem.DeviceBuffer}     # Stored values, typically nonzeros
+    occupied_cols::CuArray{Ti,1,CUDA.Mem.DeviceBuffer}  #list of columns with non zero stored values
 
     function CuSparseMatrixCSC(A::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
         occupied = Vector{Ti}()
@@ -83,7 +81,7 @@ function kernel_detect!(Uloop, ρ0colptr, ρ0rowval, ρ0nzval::CuDeviceArray{T,1
     # calculate elements in Uloop*ρ0*Uloop'.*transpose(d)
     # each thread calculates the results for a single element in the row of Uloop*ρ0
     for m = dcolptr[row]:(dcolptr[row+1]-1)
-        accumulated += row_val*CUDAnative.conj(Uloop[drowval[m], col, crystallite])*dnzval[m]
+        accumulated += row_val*conj(Uloop[drowval[m], col, crystallite])*dnzval[m]
     end
 
     accumulated = sum_block(accumulated, temporary)
@@ -98,8 +96,8 @@ end
 
 @inline function sum_block(val::T, temporary)::T where {T}
     # reduce across warps
-    wid  = div(threadIdx().x-UInt32(1), CUDAnative.warpsize()) + UInt32(1)
-    lane = rem(threadIdx().x-UInt32(1), CUDAnative.warpsize()) + UInt32(1)
+    wid  = div(threadIdx().x-UInt32(1), warpsize()) + UInt32(1)
+    lane = rem(threadIdx().x-UInt32(1), warpsize()) + UInt32(1)
     val=sum_warp(val)
 
     if lane == 1
@@ -116,11 +114,11 @@ end
 end
 
 @inline function sum_warp(val::T)::T where {T}
-    val += CUDAnative.shfl_down(val, UInt32(16))
-    val += CUDAnative.shfl_down(val, UInt32(8))
-    val += CUDAnative.shfl_down(val, UInt32(4))
-    val += CUDAnative.shfl_down(val, UInt32(2))
-    val += CUDAnative.shfl_down(val, UInt32(1))
+    val += shfl_down_sync(0xffffffff, val, UInt32(16))
+    val += shfl_down_sync(0xffffffff, val, UInt32(8))
+    val += shfl_down_sync(0xffffffff, val, UInt32(4))
+    val += shfl_down_sync(0xffffffff, val, UInt32(2))
+    val += shfl_down_sync(0xffffffff, val, UInt32(1))
     return val
 end
 
@@ -137,7 +135,7 @@ function kernel_eig_max_bound(A::CuDeviceArray{T}, results) where {T}
 
     val = T(0)
     for n = 1:blockDim().x
-        val += CUDAnative.abs(A[threadIdx().x, n, blockIdx().x])
+        val += abs(A[threadIdx().x, n, blockIdx().x])
     end
 
     val = max_block(val, shared)
@@ -151,8 +149,8 @@ end
 
 @inline function max_block(val::T, shared)::T where {T}
     # compare across warps
-    wid  = div(threadIdx().x-UInt32(1), CUDAnative.warpsize()) + UInt32(1)
-    lane = rem(threadIdx().x-UInt32(1), CUDAnative.warpsize()) + UInt32(1)
+    wid  = div(threadIdx().x-UInt32(1), warpsize()) + UInt32(1)
+    lane = rem(threadIdx().x-UInt32(1), warpsize()) + UInt32(1)
     val = max_warp(val)
 
     if lane == 1
@@ -169,11 +167,11 @@ end
 end
 
 @inline function max_warp(val::T) where {T}
-    val = CUDAnative.max(val, CUDAnative.shfl_down(val, UInt32(16)))
-    val = CUDAnative.max(val, CUDAnative.shfl_down(val, UInt32(8)))
-    val = CUDAnative.max(val, CUDAnative.shfl_down(val, UInt32(4)))
-    val = CUDAnative.max(val, CUDAnative.shfl_down(val, UInt32(2)))
-    val = CUDAnative.max(val, CUDAnative.shfl_down(val, UInt32(1)))
+    val = max(val, shfl_down_sync(0xffffffff, val, UInt32(16)))
+    val = max(val, shfl_down_sync(0xffffffff, val, UInt32(8)))
+    val = max(val, shfl_down_sync(0xffffffff, val, UInt32(4)))
+    val = max(val, shfl_down_sync(0xffffffff, val, UInt32(2)))
+    val = max(val, shfl_down_sync(0xffffffff, val, UInt32(1)))
     return val
 end
 
@@ -196,7 +194,7 @@ function kernel_threshold(A::CuDeviceArray{T}, thresh::T, results) where {T}
         if ! shared[1]
             break
         end
-        if ! (CUDAnative.abs(A[threadIdx().x, n, blockIdx().x]) <= thresh)
+        if ! (abs(A[threadIdx().x, n, blockIdx().x]) <= thresh)
             shared[1] = false
         end
     end
@@ -222,7 +220,14 @@ function Base.unsafe_convert(::Type{PtrOrCuPtr{T}}, val) where {T}
 end
 
 gemm_batch!(transA::Char, transB::Char, alpha::T, A::CuArray{T,3}, B::CuArray{T,3}, beta::T,
-    C::CuArray{T,3}) where {T<:BlasFloat} = CuArrays.CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
+    C::CuArray{T,3}) where {T<:BlasFloat} = CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
+
+function mul!(C::H, A::H, B::H, transA::Char, transB::Char, alpha::Number, beta::Number) where {T<:BlasFloat,
+        H<:HilbertOperator{<:CuArray{T,2}}}
+
+    CUBLAS.gemm!(transA, transB, T(alpha), A.data, B.data, T(beta), C.data)
+    C
+end
 
 # This isn't an actual BLAS operation, because the arrays are different types, but we use this in expm_cheby
 # The fallback uses getindex, which is horribly slow for CuArrays so define a replacement with a CUDA kernel

@@ -244,9 +244,9 @@ struct SimulationParameters{M<:CalculationMode,T<:BlasReal,A<:AbstractArray{Comp
         if M == CPUSingleMode || M == CPUMultiProcess
             A = Array{Complex{T},2}
         elseif M == GPUBatchedMode
-            A = CuArray{Complex{T},3}
+            A = CuArray{Complex{T},3,CUDA.Mem.DeviceBuffer}
         elseif M == GPUSingleMode
-            A = CuArray{Complex{T},2}
+            A = CuArray{Complex{T},2,CUDA.Mem.DeviceBuffer}
         end
         temps = Vector{Propagator{A}}()
 
