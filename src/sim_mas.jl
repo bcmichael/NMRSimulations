@@ -139,6 +139,8 @@ end
 function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
     parameters::SimulationParameters{GPUSingleMode,T,A}) where {T,A}
 
+    CUDA.functional() || throw(ArgumentError("Cannot use GPU modes without functional CUDA"))
+
     nγ = parameters.nγ
 
     H = [Hamiltonian(euler_rotation(Hint, crystal_angles), CuArray) for crystal_angles in crystallites.angles]
@@ -159,6 +161,8 @@ end
 
 function powder_average(sequence::Sequence{T}, Hint::SphericalTensor, ρ0, detector, crystallites::Crystallites{T},
     parameters::SimulationParameters{GPUBatchedMode,T,A}) where {T,A}
+
+    CUDA.functional() || throw(ArgumentError("Cannot use GPU modes without functional CUDA"))
 
     nγ = parameters.nγ
 
