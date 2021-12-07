@@ -207,18 +207,6 @@ function kernel_threshold(A::CuDeviceArray{T}, thresh::T, results) where {T}
     return nothing
 end
 
-# Fix performance issue in CUDAdrv 2.0.0
-function Base.unsafe_convert(::Type{PtrOrCuPtr{T}}, val) where {T}
-    ptr = if applicable(Base.unsafe_convert, Ptr{T}, val)
-        Base.unsafe_convert(Ptr{T}, val)
-    elseif applicable(Base.unsafe_convert, CuPtr{T}, val)
-        Base.unsafe_convert(CuPtr{T}, val)
-    else
-        throw(ArgumentError("cannot convert to either a CPU or GPU pointer"))
-    end
-    return Base.bitcast(PtrOrCuPtr{T}, ptr)
-end
-
 gemm_batch!(transA::Char, transB::Char, alpha::T, A::CuArray{T,3}, B::CuArray{T,3}, beta::T,
     C::CuArray{T,3}) where {T<:BlasFloat} = CUBLAS.gemm_strided_batched!(transA, transB, alpha, A, B, beta, C)
 
